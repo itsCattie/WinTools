@@ -1,0 +1,11 @@
+<RCC>
+    <qresource prefix="/icons">
+        <file alias="app/wintools.svg">icons/app/wintools.svg</file>
+        <file alias="modules/mediabar.svg">icons/modules/mediabar.svg</file>
+        <file alias="modules/disksentinel.svg">icons/modules/disksentinel.svg</file>
+        <file alias="modules/taskmanager.svg">icons/modules/taskmanager.svg</file>
+        <file alias="modules/gamevault.svg">icons/modules/gamevault.svg</file>
+        <file alias="modules/streamvault.svg">icons/modules/streamvault.svg</file>
+        <file alias="modules/logviewer.svg">icons/modules/logviewer.svg</file>
+    </qresource>
+</RCC>

@@ -1,0 +1,80 @@
+# Build outputs
+[Bb]in/
+[Oo]bj/
+native/MediaBarService/build/
+src/modules/MediaBar/build/
+src/modules/MediaBar/.qt/
+
+# User-specific files
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Visual Studio / VS Code settings
+.vs/
+.vscode/
+
+# Rider / ReSharper
+.idea/
+_ReSharper*/
+*.[Rr]e[Ss]harper
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+!packages/build/
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp
+*.cache
+*.bak
+
+# Environment and secrets
+.venv
+.env
+.env.*
+!.env.example
+*.secret
+*.secrets
+*.token
+*.credentials
+*.pem
+*.key
+*.p12
+*.cer
+*.crt
+
+# Debug symbols
+*.pdb
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Test and coverage outputs
+TestResults/
+coverage/
+coverage.*
+
+# Publish outputs
+publish/
+artifacts/
+
+# CMake / Ninja generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+build.ninja
+.ninja_*
+
+# CMake build directories
+build-*/
+build/
+dist/
