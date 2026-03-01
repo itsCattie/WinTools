@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <cmath>
 
-// WinTools: icon helper manages shared infrastructure.
-
 namespace wintools::themes {
 
 int IconHelper::scaleIconSize(int basePixels, float dpiScale) {

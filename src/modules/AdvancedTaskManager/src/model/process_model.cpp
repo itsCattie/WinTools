@@ -5,8 +5,6 @@
 #include <QColor>
 #include <algorithm>
 
-// AdvancedTaskManager: process model manages model/view data shaping.
-
 namespace wintools::taskmanager {
 
 static QString fmtMemory(quint64 bytes) {
@@ -204,6 +202,7 @@ QVariant ProcessTreeModel::data(const QModelIndex& index, int role) const {
     if (role == PidRole)     return pi.pid;
     if (role == CategoryRole) return static_cast<int>(pi.category);
     if (role == RawCpuRole)  return pi.cpuPercent;
+    if (role == RawGpuRole)  return pi.gpuPercent;
     if (role == RawMemRole)  return pi.workingSetBytes;
     if (role == RawDiskRole) return pi.diskReadBytesPerSec + pi.diskWriteBytesPerSec;
 
@@ -212,10 +211,12 @@ QVariant ProcessTreeModel::data(const QModelIndex& index, int role) const {
     if (role == Qt::ForegroundRole && pi.status == ProcessStatus::Suspended)
         return QBrush(QColor(Qt::darkYellow));
 
-    if (role == Qt::ForegroundRole && index.column() == ProcessCol::CPU) {
-        if (pi.cpuPercent >= 75.0)
+    if (role == Qt::ForegroundRole
+        && (index.column() == ProcessCol::CPU || index.column() == ProcessCol::GPU)) {
+        const double usage = index.column() == ProcessCol::CPU ? pi.cpuPercent : pi.gpuPercent;
+        if (usage >= 75.0)
             return QBrush(QColor(0xE7, 0x4C, 0x3C));
-        if (pi.cpuPercent >= 25.0)
+        if (usage >= 25.0)
             return QBrush(QColor(0xF3, 0x9C, 0x12));
         return QBrush(QColor(0x2E, 0xCC, 0x71));
     }
@@ -230,9 +231,15 @@ QVariant ProcessTreeModel::data(const QModelIndex& index, int role) const {
         case ProcessCol::PID:      return pi.pid;
         case ProcessCol::Status:   return statusText(pi.status);
         case ProcessCol::CPU:      return QStringLiteral("%1%").arg(pi.cpuPercent, 0, 'f', 1);
+        case ProcessCol::GPU:      return QStringLiteral("%1%").arg(pi.gpuPercent, 0, 'f', 1);
         case ProcessCol::Memory:   return formatMemory(pi.workingSetBytes);
         case ProcessCol::Disk:     return formatDisk(pi.diskReadBytesPerSec,
                                                      pi.diskWriteBytesPerSec);
+        case ProcessCol::Network: {
+            int total = pi.tcpConnections + pi.udpEndpoints;
+            if (total == 0) return QStringLiteral("—");
+            return QStringLiteral("%1 TCP / %2 UDP").arg(pi.tcpConnections).arg(pi.udpEndpoints);
+        }
         case ProcessCol::Handles:  return pi.handleCount;
         case ProcessCol::Threads:  return pi.threadCount;
         case ProcessCol::Username: return pi.username;
@@ -248,8 +255,10 @@ QVariant ProcessTreeModel::headerData(int section, Qt::Orientation orientation,
         case ProcessCol::PID:      return QStringLiteral("PID");
         case ProcessCol::Status:   return QStringLiteral("Status");
         case ProcessCol::CPU:      return QStringLiteral("CPU");
+        case ProcessCol::GPU:      return QStringLiteral("GPU");
         case ProcessCol::Memory:   return QStringLiteral("Memory");
         case ProcessCol::Disk:     return QStringLiteral("Disk");
+        case ProcessCol::Network:  return QStringLiteral("Network");
         case ProcessCol::Handles:  return QStringLiteral("Handles");
         case ProcessCol::Threads:  return QStringLiteral("Threads");
         case ProcessCol::Username: return QStringLiteral("User");
@@ -332,6 +341,7 @@ QVariant ProcessTableModel::data(const QModelIndex& index, int role) const {
 
     if (role == PidRole)     return pi.pid;
     if (role == RawCpuRole)  return pi.cpuPercent;
+    if (role == RawGpuRole)  return pi.gpuPercent;
     if (role == RawMemRole)  return pi.workingSetBytes;
     if (role == RawDiskRole) return pi.diskReadBytesPerSec + pi.diskWriteBytesPerSec;
 
@@ -340,10 +350,12 @@ QVariant ProcessTableModel::data(const QModelIndex& index, int role) const {
     if (role == Qt::ForegroundRole && pi.status == ProcessStatus::Suspended)
         return QBrush(QColor(Qt::darkYellow));
 
-    if (role == Qt::ForegroundRole && index.column() == ProcessCol::CPU) {
-        if (pi.cpuPercent >= 75.0)
+    if (role == Qt::ForegroundRole
+        && (index.column() == ProcessCol::CPU || index.column() == ProcessCol::GPU)) {
+        const double usage = index.column() == ProcessCol::CPU ? pi.cpuPercent : pi.gpuPercent;
+        if (usage >= 75.0)
             return QBrush(QColor(0xE7, 0x4C, 0x3C));
-        if (pi.cpuPercent >= 25.0)
+        if (usage >= 25.0)
             return QBrush(QColor(0xF3, 0x9C, 0x12));
         return QBrush(QColor(0x2E, 0xCC, 0x71));
     }
@@ -358,9 +370,15 @@ QVariant ProcessTableModel::data(const QModelIndex& index, int role) const {
         case ProcessCol::PID:      return pi.pid;
         case ProcessCol::Status:   return fmtStatus(pi.status);
         case ProcessCol::CPU:      return QStringLiteral("%1%").arg(pi.cpuPercent, 0, 'f', 1);
+        case ProcessCol::GPU:      return QStringLiteral("%1%").arg(pi.gpuPercent, 0, 'f', 1);
         case ProcessCol::Memory:   return fmtMemory(pi.workingSetBytes);
         case ProcessCol::Disk:     return fmtDisk(pi.diskReadBytesPerSec,
                                                   pi.diskWriteBytesPerSec);
+        case ProcessCol::Network: {
+            int total = pi.tcpConnections + pi.udpEndpoints;
+            if (total == 0) return QStringLiteral("—");
+            return QStringLiteral("%1 TCP / %2 UDP").arg(pi.tcpConnections).arg(pi.udpEndpoints);
+        }
         case ProcessCol::Handles:  return pi.handleCount;
         case ProcessCol::Threads:  return pi.threadCount;
         case ProcessCol::Username: return pi.username;
@@ -376,8 +394,10 @@ QVariant ProcessTableModel::headerData(int section, Qt::Orientation orientation,
         case ProcessCol::PID:      return QStringLiteral("PID");
         case ProcessCol::Status:   return QStringLiteral("Status");
         case ProcessCol::CPU:      return QStringLiteral("CPU");
+        case ProcessCol::GPU:      return QStringLiteral("GPU");
         case ProcessCol::Memory:   return QStringLiteral("Memory");
         case ProcessCol::Disk:     return QStringLiteral("Disk");
+        case ProcessCol::Network:  return QStringLiteral("Network");
         case ProcessCol::Handles:  return QStringLiteral("Handles");
         case ProcessCol::Threads:  return QStringLiteral("Threads");
         case ProcessCol::Username: return QStringLiteral("User");
@@ -427,6 +447,10 @@ bool ProcessFilterProxy::lessThan(const QModelIndex& left,
     if (col == ProcessCol::CPU) {
         return left.data(RawCpuRole).toDouble()
              < right.data(RawCpuRole).toDouble();
+    }
+    if (col == ProcessCol::GPU) {
+        return left.data(RawGpuRole).toDouble()
+             < right.data(RawGpuRole).toDouble();
     }
     if (col == ProcessCol::Memory) {
         return left.data(RawMemRole).toULongLong()

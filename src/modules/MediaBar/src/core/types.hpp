@@ -1,7 +1,5 @@
 #pragma once
 
-// MediaBar: types manages core logic and state.
-
 #include <QString>
 #include <QVector>
 
@@ -23,6 +21,7 @@ struct PlaybackInfo {
     QString trackUri;
     QString albumUri;
     QString albumArt;
+    int volumePercent = -1;
     QString source;
 };
 

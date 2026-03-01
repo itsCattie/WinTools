@@ -5,8 +5,6 @@
 #include <QJsonObject>
 #include <QSettings>
 
-// GameVault: gamevault settings manages core logic and state.
-
 namespace wintools::gamevault {
 
 static constexpr char kOrg[]     = "WinTools";
@@ -247,6 +245,16 @@ void GameVaultSettings::clearGameExecutableOverride(const QString& locatorKey) {
     QJsonObject root = doc.object();
     root.remove(key);
     s.setValue(kGameOverrides, QJsonDocument(root).toJson(QJsonDocument::Compact));
+}
+
+QString GameVaultSettings::steamGridDbApiKey() const {
+    QSettings s(kOrg, kApp);
+    return s.value("gamevault/steamgriddb_api_key").toString();
+}
+
+void GameVaultSettings::setSteamGridDbApiKey(const QString& key) {
+    QSettings s(kOrg, kApp);
+    s.setValue("gamevault/steamgriddb_api_key", key.trimmed());
 }
 
 }

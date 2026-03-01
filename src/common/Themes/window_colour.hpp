@@ -1,7 +1,5 @@
 #pragma once
 
-// WinTools: window colour manages shared infrastructure.
-
 #include <QColor>
 
 namespace wintools::themes {
@@ -30,6 +28,9 @@ class WindowColour {
 public:
     static ThemePalette light();
     static ThemePalette dark();
+    static ThemePalette midnight();
+    static ThemePalette forest();
+    static ThemePalette rose();
 };
 
 }

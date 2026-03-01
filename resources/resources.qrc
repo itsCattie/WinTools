@@ -7,5 +7,29 @@
         <file alias="modules/gamevault.svg">icons/modules/gamevault.svg</file>
         <file alias="modules/streamvault.svg">icons/modules/streamvault.svg</file>
         <file alias="modules/logviewer.svg">icons/modules/logviewer.svg</file>
+        <file alias="modules/audiomaster.svg">icons/modules/audiomaster.svg</file>
+        <file alias="mediabar/shuffle.svg">icons/mediabar/shuffle.svg</file>
+        <file alias="mediabar/spotify.svg">icons/mediabar/spotify.svg</file>
+        <file alias="mediabar/sonos.svg">icons/mediabar/sonos.svg</file>
+        <file alias="mediabar/search.svg">icons/mediabar/search.svg</file>
+        <file alias="mediabar/library.svg">icons/mediabar/library.svg</file>
+        <file alias="mediabar/devices.svg">icons/mediabar/devices.svg</file>
+        <file alias="mediabar/browse.svg">icons/mediabar/browse.svg</file>
+        <file alias="mediabar/queue.svg">icons/mediabar/queue.svg</file>
+        <file alias="mediabar/appearance.svg">icons/mediabar/appearance.svg</file>
+        <file alias="mediabar/library_path.svg">icons/mediabar/library_path.svg</file>
+        <file alias="mediabar/debug.svg">icons/mediabar/debug.svg</file>
+        <file alias="gamevault/ui/search.svg">icons/gamevault/ui/search.svg</file>
+        <file alias="gamevault/ui/rescan.svg">icons/gamevault/ui/rescan.svg</file>
+        <file alias="gamevault/ui/add.svg">icons/gamevault/ui/add.svg</file>
+        <file alias="gamevault/ui/settings.svg">icons/gamevault/ui/settings.svg</file>
+        <file alias="gamevault/ui/check_off.svg">icons/gamevault/ui/check_off.svg</file>
+        <file alias="gamevault/ui/check_on.svg">icons/gamevault/ui/check_on.svg</file>
+        <file alias="gamevault/ui/play.svg">icons/gamevault/ui/play.svg</file>
+        <file alias="gamevault/ui/back.svg">icons/gamevault/ui/back.svg</file>
+        <file alias="gamevault/ui/folder.svg">icons/gamevault/ui/folder.svg</file>
+        <file alias="gamevault/ui/image.svg">icons/gamevault/ui/image.svg</file>
+        <file alias="gamevault/ui/info.svg">icons/gamevault/ui/info.svg</file>
+        <file alias="gamevault/ui/launch.svg">icons/gamevault/ui/launch.svg</file>
     </qresource>
 </RCC>

@@ -1,11 +1,10 @@
 #pragma once
 
-// DiskSentinel: storage model manages model/view data shaping.
-
 #include "modules/disksentinel/src/core/disk_node.hpp"
 
 #include <QAbstractItemModel>
 #include <QHash>
+#include <QIcon>
 #include <memory>
 
 namespace wintools::disksentinel {
@@ -41,6 +40,7 @@ public:
     QModelIndex      indexForNode(DiskNode* node) const;
 
 private:
+    void ensureIconsInitialized() const;
     void sortNode(DiskNode* node, int column, Qt::SortOrder order);
     void invalidateDisplayCache();
 
@@ -49,6 +49,9 @@ private:
     Qt::SortOrder m_sortOrder  = Qt::DescendingOrder;
 
     mutable QHash<DiskNode*, QString> m_sizeCache;
+    mutable QIcon m_dirIcon;
+    mutable QIcon m_fileIcon;
+    mutable bool  m_iconsInitialized = false;
 };
 
 }

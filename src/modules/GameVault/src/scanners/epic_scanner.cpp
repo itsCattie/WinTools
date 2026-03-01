@@ -12,8 +12,6 @@
 #include <QStandardPaths>
 #include <QUrl>
 
-// GameVault: epic scanner manages discovery and scanning flow.
-
 namespace wintools::gamevault {
 
 namespace {
@@ -95,12 +93,11 @@ void applyImageByType(GameEntry& e, const QString& type, const QString& url) {
 }
 
 QString findEpicManifestDir() {
-
+#ifdef Q_OS_WIN
     QSettings reg(R"(HKEY_LOCAL_MACHINE\SOFTWARE\Epic Games\EpicGamesLauncher)",
                   QSettings::NativeFormat);
     QString path = reg.value("AppDataPath").toString();
     if (path.isEmpty()) {
-
         QSettings reg32(R"(HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Epic Games\EpicGamesLauncher)",
                         QSettings::NativeFormat);
         path = reg32.value("AppDataPath").toString();
@@ -112,6 +109,17 @@ QString findEpicManifestDir() {
 
     const QString fb = R"(C:/ProgramData/Epic/EpicGamesLauncher/Data/Manifests)";
     return QDir(fb).exists() ? fb : QString();
+#elif defined(Q_OS_MACOS)
+    const QString macPath = QDir::homePath()
+        + "/Library/Application Support/Epic/EpicGamesLauncher/Data/Manifests";
+    return QDir(macPath).exists() ? macPath : QString();
+#elif defined(Q_OS_LINUX)
+
+    const QString heroicPath = QDir::homePath() + "/.config/heroic/store_cache";
+    return QDir(heroicPath).exists() ? heroicPath : QString();
+#else
+    return {};
+#endif
 }
 
 GameEntry entryFromItem(const QString& itemPath) {

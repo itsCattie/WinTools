@@ -1,7 +1,5 @@
 #include "stream_model.hpp"
 
-// StreamVault: stream model manages model/view data shaping.
-
 namespace wintools::streamvault {
 
 StreamListModel::StreamListModel(QObject* parent) : QAbstractListModel(parent) {}

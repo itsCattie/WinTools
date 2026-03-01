@@ -1,7 +1,5 @@
 #pragma once
 
-// StreamVault: streaming service manages core logic and state.
-
 #include <QList>
 #include <QString>
 #include <QVector>

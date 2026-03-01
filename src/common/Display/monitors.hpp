@@ -1,7 +1,5 @@
 #pragma once
 
-// WinTools: monitors manages shared infrastructure.
-
 #include <QRect>
 
 class QWidget;

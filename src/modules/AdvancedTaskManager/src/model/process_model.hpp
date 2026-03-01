@@ -1,7 +1,5 @@
 #pragma once
 
-// AdvancedTaskManager: process model manages model/view data shaping.
-
 #include <QAbstractItemModel>
 #include <QVector>
 #include <QSortFilterProxyModel>
@@ -15,12 +13,14 @@ namespace ProcessCol {
     inline constexpr int PID      = 1;
     inline constexpr int Status   = 2;
     inline constexpr int CPU      = 3;
-    inline constexpr int Memory   = 4;
-    inline constexpr int Disk     = 5;
-    inline constexpr int Handles  = 6;
-    inline constexpr int Threads  = 7;
-    inline constexpr int Username = 8;
-    inline constexpr int Count    = 9;
+    inline constexpr int GPU      = 4;
+    inline constexpr int Memory   = 5;
+    inline constexpr int Disk     = 6;
+    inline constexpr int Network  = 7;
+    inline constexpr int Handles  = 8;
+    inline constexpr int Threads  = 9;
+    inline constexpr int Username = 10;
+    inline constexpr int Count    = 11;
 }
 
 enum ProcessRole {
@@ -28,8 +28,9 @@ enum ProcessRole {
     CategoryRole = Qt::UserRole + 2,
     IsGroupRole  = Qt::UserRole + 3,
     RawCpuRole   = Qt::UserRole + 4,
-    RawMemRole   = Qt::UserRole + 5,
-    RawDiskRole  = Qt::UserRole + 6,
+    RawGpuRole   = Qt::UserRole + 5,
+    RawMemRole   = Qt::UserRole + 6,
+    RawDiskRole  = Qt::UserRole + 7,
 };
 
 class ProcessTreeModel : public QAbstractItemModel {

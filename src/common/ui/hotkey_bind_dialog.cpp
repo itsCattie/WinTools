@@ -7,8 +7,6 @@
 #include <QShowEvent>
 #include <QVBoxLayout>
 
-// WinTools: hotkey bind dialog manages UI behavior and presentation.
-
 namespace wintools::ui {
 
 HotkeyBindDialog::HotkeyBindDialog(const QString&                          module,
@@ -226,6 +224,7 @@ QString HotkeyBindDialog::actionIdToLabel(const QString& actionId) {
         {"toggle",    "Toggle"},
         {"show_mini", "Show Mini"},
         {"show_full", "Show Full"},
+        {"toggle_profiler", "Toggle Profiler Overlay"},
         {"open_main", "Open Main Window"},
     };
     if (labels.contains(actionId)) return labels.value(actionId);

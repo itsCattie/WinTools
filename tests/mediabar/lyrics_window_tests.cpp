@@ -9,8 +9,6 @@
 #include <QPushButton>
 #include <QTemporaryDir>
 
-// WinTools: lyrics window tests manages feature behavior.
-
 namespace {
 
 QLabel* findLabelByObjectName(QWidget* root, const char* objectName) {
@@ -80,9 +78,9 @@ void LyricsWindowTests::initTestCase() {
 void LyricsWindowTests::hasCoreControlsAndDefaultSourceMode() {
     LyricsWindow window;
 
-    QCOMPARE(window.sourceMode(), QString("auto"));
-    QVERIFY(window.sourceAutoButton());
-    QVERIFY(window.sourceAutoButton()->isChecked());
+    QCOMPARE(window.sourceMode(), QString("spotify"));
+    QVERIFY(window.sourceSpotifyButton());
+    QVERIFY(window.sourceSpotifyButton()->isChecked());
     QVERIFY(window.searchButton());
     QCOMPARE(window.searchButton()->property("fullText").toString(), QString("Search"));
     QVERIFY(window.prevButton());
@@ -98,7 +96,6 @@ void LyricsWindowTests::sourceModeSelectionSyncsButtons() {
     window.setSourceMode("spotify");
     QCOMPARE(window.sourceMode(), QString("spotify"));
     QVERIFY(window.sourceSpotifyButton()->isChecked());
-    QVERIFY(!window.sourceAutoButton()->isChecked());
     QVERIFY(!window.sourceSonosButton()->isChecked());
 
     window.setSourceMode("sonos");
@@ -106,8 +103,8 @@ void LyricsWindowTests::sourceModeSelectionSyncsButtons() {
     QVERIFY(window.sourceSonosButton()->isChecked());
 
     window.setSourceMode("invalid-mode");
-    QCOMPARE(window.sourceMode(), QString("auto"));
-    QVERIFY(window.sourceAutoButton()->isChecked());
+    QCOMPARE(window.sourceMode(), QString("spotify"));
+    QVERIFY(window.sourceSpotifyButton()->isChecked());
 }
 
 void LyricsWindowTests::sidebarToggleCollapsesAndRestoresLabels() {
@@ -116,12 +113,12 @@ void LyricsWindowTests::sidebarToggleCollapsesAndRestoresLabels() {
 
     window.setSidebarExpanded(false);
     QVERIFY(!window.isSidebarExpanded());
-    QVERIFY(window.sourceAutoButton()->isHidden());
+
+    QVERIFY(!window.sourceSpotifyButton()->isHidden());
     QCOMPARE(window.searchButton()->text(), window.searchButton()->property("iconEmoji").toString());
 
     window.setSidebarExpanded(true);
     QVERIFY(window.isSidebarExpanded());
-    QVERIFY(!window.sourceAutoButton()->isHidden());
     QVERIFY(!window.sourceSpotifyButton()->isHidden());
     QVERIFY(!window.sourceSonosButton()->isHidden());
     QVERIFY(window.searchButton()->text().contains("Search"));

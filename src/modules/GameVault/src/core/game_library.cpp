@@ -4,6 +4,7 @@
 #include "../scanners/steam_scanner.hpp"
 #include "../scanners/epic_scanner.hpp"
 #include "../scanners/gog_scanner.hpp"
+#include "../scanners/xbox_scanner.hpp"
 #include "../scanners/retroarch_scanner.hpp"
 #include "../scanners/emulator_scanners.hpp"
 #include "../scanners/custom_folder_scanner.hpp"
@@ -11,8 +12,6 @@
 #include <algorithm>
 #include <memory>
 #include <QVector>
-
-// GameVault: game library manages core logic and state.
 
 namespace wintools::gamevault {
 
@@ -25,6 +24,7 @@ QVector<GameEntry> GameLibrary::scan() {
     scanners.push_back(std::make_unique<SteamScanner>());
     scanners.push_back(std::make_unique<EpicScanner>());
     scanners.push_back(std::make_unique<GogScanner>());
+    scanners.push_back(std::make_unique<XboxScanner>());
     scanners.push_back(std::make_unique<RetroArchScanner>());
     scanners.push_back(std::make_unique<Rpcs3Scanner>());
     scanners.push_back(std::make_unique<YuzuScanner>());

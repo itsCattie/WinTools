@@ -1,7 +1,5 @@
 #pragma once
 
-// MediaBar: mediabar controller manages feature behavior.
-
 #include <QObject>
 
 class LyricsApp;

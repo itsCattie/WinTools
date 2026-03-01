@@ -1,7 +1,5 @@
 #pragma once
 
-// WinTools: hotkey config manages shared infrastructure.
-
 #include "common/hotkey/hotkey_engine.hpp"
 
 namespace wintools::hotkeys {

@@ -1,14 +1,15 @@
 #pragma once
 
-// DiskSentinel: disk sentinel window manages UI behavior and presentation.
-
 #include "common/themes/window_colour.hpp"
 #include "modules/disksentinel/src/core/disk_node.hpp"
 #include "modules/disksentinel/src/scanner/disk_scanner.hpp"
 #include "modules/disksentinel/src/model/storage_model.hpp"
 #include "modules/disksentinel/src/ui/treemap_widget.hpp"
+#include "modules/disksentinel/src/ui/pie_chart_widget.hpp"
 
 #include <QDialog>
+#include <QElapsedTimer>
+#include <QHash>
 #include <memory>
 
 namespace wintools::themes { class ThemeListener; }
@@ -53,6 +54,10 @@ private slots:
     void reload();
     void toggleExpandCollapse();
 
+    void onTreeContextMenu(const QPoint& pos);
+    void exportCsv();
+    void findDuplicates();
+
 private:
     void buildUi();
     void buildDrivePanel();
@@ -68,6 +73,7 @@ private:
     void updatePathBar(DiskNode* node);
     void setStatus(const QString& msg, bool busy = false);
     void applyTheme();
+    void rebuildPathIndex();
 
     QScrollArea*   m_driveScroll  = nullptr;
     QFrame*        m_driveBar     = nullptr;
@@ -76,6 +82,8 @@ private:
     QLineEdit*     m_pathBar      = nullptr;
     QPushButton*   m_rescanBtn         = nullptr;
     QPushButton*   m_reloadBtn          = nullptr;
+    QPushButton*   m_exportBtn          = nullptr;
+    QPushButton*   m_findDupesBtn       = nullptr;
     QPushButton*   m_expandCollapseBtn  = nullptr;
     bool           m_treeExpanded       = false;
     QLabel*        m_statusLabel        = nullptr;
@@ -83,7 +91,9 @@ private:
 
     QSplitter*     m_splitter     = nullptr;
     QTreeView*     m_treeView     = nullptr;
+    QSplitter*     m_rightSplitter = nullptr;
     TreemapWidget* m_treemap      = nullptr;
+    PieChartWidget* m_pieChart    = nullptr;
 
     QFrame*        m_legend       = nullptr;
 
@@ -95,9 +105,13 @@ private:
     DiskNode*                        m_displayRoot = nullptr;
 
     QString                          m_scanPath;
+    QHash<QString, DiskNode*>        m_pathIndex;
 
     wintools::themes::ThemePalette   m_palette;
     wintools::themes::ThemeListener* m_themeListener = nullptr;
+
+    QElapsedTimer                    m_progressUiTimer;
+    qint64                           m_lastProgressUiMs = 0;
 };
 
 }

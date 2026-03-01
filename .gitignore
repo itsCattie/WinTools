@@ -35,7 +35,6 @@ packages/
 *.bak
 
 # Environment and secrets
-.venv
 .env
 .env.*
 !.env.example
@@ -78,3 +77,9 @@ build.ninja
 build-*/
 build/
 dist/
+
+# Tests
+tests/
+/tests/**
+/tests/**/*.cpp
+Testing/

@@ -15,19 +15,17 @@ WinTools is a modular Windows desktop utility app. Each module is a self-contain
 
 ## Requirements
 
-- Windows 10 or later
-- Qt 6.5+ (mingw64)
-- CMake 3.20+
 - A free [TMDB API key](https://www.themoviedb.org/settings/api) for StreamVault search
+- Use the [Spotify for Developer Page](https://developer.spotify.com/dashboard) for spotify for MediaBar.
 
 ## Building
 
-```bash
+.\scripts\build-and-run.ps1
+
+or
+
 cmake -S . -B build-cpp -G Ninja \
   -DCMAKE_PREFIX_PATH="C:/Qt/6.9.3/mingw_64/lib/cmake" \
   -DCMAKE_BUILD_TYPE=Debug
 
 ninja -C build-cpp
-```
-
-Or use the provided VS Code tasks: **CMake: Configure** then **CMake: Build**.

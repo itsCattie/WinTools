@@ -2,6 +2,8 @@
 
 #include "config.hpp"
 #include "debug_logger.hpp"
+#include "common/themes/theme_helper.hpp"
+#include "common/themes/color_utils.hpp"
 
 #include <QApplication>
 #include <QFont>
@@ -30,43 +32,19 @@
 #include <cmath>
 #include <string>
 
-// MediaBar: mini player manages UI behavior and presentation.
-
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
 
 namespace {
 
-QIcon tintedIcon(const QIcon& base, const QSize& size, const QColor& tint) {
-    if (base.isNull()) {
-        return QIcon();
-    }
+using wintools::themes::ThemeHelper;
+using wintools::themes::ThemePalette;
+using wintools::themes::tintedIcon;
 
-    QPixmap pix = base.pixmap(size);
-    if (pix.isNull()) {
-        return QIcon();
-    }
-
-    QImage image = pix.toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
-    QPainter painter(&image);
-    painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
-    painter.fillRect(image.rect(), tint);
-    painter.end();
-
-    return QIcon(QPixmap::fromImage(image));
-}
+ThemePalette themePalette() { return ThemeHelper::currentPalette(); }
 
 void appendMiniDebugLog(const QString& message) {
-    const QString path = QDir(config::appDataDir()).filePath("mini_player_debug.log");
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        return;
-    }
-
-    QTextStream stream(&file);
-    stream << "[" << QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz") << "] " << message << "\n";
-
     debuglog::trace("MiniFullscreen", message);
 }
 
@@ -101,8 +79,7 @@ public:
             return;
         }
         text_ = text;
-        offset1_ = 0;
-        offset2_ = 0;
+        scrollOffset_ = 0;
         pauseTicks_ = 0;
         recalc();
         update();
@@ -122,7 +99,7 @@ protected:
         painter.fillRect(rect(), Qt::transparent);
         painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
         painter.setRenderHint(QPainter::TextAntialiasing, true);
-        painter.setPen(QColor("#FFFFFF"));
+        painter.setPen(themePalette().foreground);
 
         QFont font(QString::fromUtf8("Segoe UI"));
         font.setPointSize(std::max(6, static_cast<int>(9 * uiScale_)));
@@ -134,8 +111,10 @@ protected:
             return;
         }
 
-        painter.drawText(QPoint(static_cast<int>(offset1_), baseline), text_);
-        painter.drawText(QPoint(static_cast<int>(offset2_), baseline), text_);
+        const int x1 = -static_cast<int>(scrollOffset_);
+        const int x2 = x1 + cycleLength_;
+        painter.drawText(QPoint(x1, baseline), text_);
+        painter.drawText(QPoint(x2, baseline), text_);
     }
 
 private:
@@ -154,15 +133,15 @@ private:
 
         if (!textTooLong_) {
             timer_.stop();
-            offset1_ = 0;
-            offset2_ = 0;
+            scrollOffset_ = 0;
+            cycleLength_ = 0;
             pauseTicks_ = 0;
             return;
         }
 
         marqueeGap_ = s(24);
-        offset1_ = 0;
-        offset2_ = static_cast<double>(textWidth_ + marqueeGap_);
+        cycleLength_ = textWidth_ + marqueeGap_;
+        scrollOffset_ = 0;
         pauseTicks_ = 90;
         if (!timer_.isActive()) {
             timer_.start();
@@ -181,20 +160,9 @@ private:
             return;
         }
 
-        offset1_ -= 1.0;
-        offset2_ -= 1.0;
-
-        bool wrapped = false;
-        if ((offset1_ + static_cast<double>(textWidth_)) < 0.0) {
-            offset1_ = offset2_ + static_cast<double>(textWidth_ + marqueeGap_);
-            wrapped = true;
-        }
-        if ((offset2_ + static_cast<double>(textWidth_)) < 0.0) {
-            offset2_ = offset1_ + static_cast<double>(textWidth_ + marqueeGap_);
-            wrapped = true;
-        }
-
-        if (wrapped) {
+        scrollOffset_ += 1.0;
+        if (scrollOffset_ >= static_cast<double>(cycleLength_)) {
+            scrollOffset_ = 0.0;
             pauseTicks_ = 60;
         }
 
@@ -208,8 +176,8 @@ private:
     int marqueeGap_ = 24;
     bool textTooLong_ = false;
     int pauseTicks_ = 0;
-    double offset1_ = 0.0;
-    double offset2_ = 0.0;
+    int cycleLength_ = 0;
+    double scrollOffset_ = 0.0;
 };
 
 }
@@ -256,7 +224,7 @@ void MiniPlayer::setupUi() {
 
     artButton_ = new QPushButton(QString::fromUtf8("♪"), frame_);
     artButton_->setCursor(Qt::PointingHandCursor);
-    artButton_->setStyleSheet(artButton_->styleSheet() + "font-size: 20pt; color: #888888;");
+    artButton_->setStyleSheet(artButton_->styleSheet() + QString("font-size: 20pt; color: %1;").arg(themePalette().mutedForeground.name()));
 
     infoContainer_ = new QWidget(frame_);
     marquee_ = new TrackMarquee(infoContainer_);
@@ -278,19 +246,19 @@ void MiniPlayer::setupUi() {
     heartButton_ = new QPushButton(QString::fromUtf8("♡"), controlsContainer_);
     heartButton_->setObjectName("heartBtn");
     heartButton_->setCursor(Qt::PointingHandCursor);
-    heartButton_->setStyleSheet(heartButton_->styleSheet() + btnBase + "background-color: rgba(0,0,0,165); border: none;");
+    heartButton_->setStyleSheet(heartButton_->styleSheet() + btnBase + "background-color: transparent; border: none;");
 
     prevButton_ = new QPushButton(QString(), controlsContainer_);
     prevButton_->setCursor(Qt::PointingHandCursor);
-    prevButton_->setStyleSheet(prevButton_->styleSheet() + btnBase + "background-color: rgba(0,0,0,165); border: none;");
+    prevButton_->setStyleSheet(prevButton_->styleSheet() + btnBase + "background-color: transparent; border: none;");
 
     playPauseButton_ = new QPushButton(QString(), controlsContainer_);
     playPauseButton_->setCursor(Qt::PointingHandCursor);
-    playPauseButton_->setStyleSheet(playPauseButton_->styleSheet() + btnBase + "background-color: rgba(0,0,0,190); border: none;");
+    playPauseButton_->setStyleSheet(playPauseButton_->styleSheet() + btnBase + "background-color: transparent; border: none;");
 
     nextButton_ = new QPushButton(QString(), controlsContainer_);
     nextButton_->setCursor(Qt::PointingHandCursor);
-    nextButton_->setStyleSheet(nextButton_->styleSheet() + btnBase + "background-color: rgba(0,0,0,165); border: none;");
+    nextButton_->setStyleSheet(nextButton_->styleSheet() + btnBase + "background-color: transparent; border: none;");
 
     applyGeometry();
     applyStyles();
@@ -321,22 +289,26 @@ void MiniPlayer::applyGeometry() {
 
     artButton_->setGeometry(s(4), 0, s(kArtSize), s(kArtSize));
 
-    infoContainer_->setGeometry(s(50), 0, s(kInfoWidth), s(kHeight));
-    marquee_->setGeometry(0, s(2), s(kInfoWidth), s(18));
-    sourceButton_->setGeometry(0, s(20), s(kInfoWidth), s(14));
+    const int infoX = s(4 + kArtSize + 8);
+    const int controlsX = s(260);
+    const int infoWidth = std::max(s(kInfoWidth), controlsX - infoX);
+    infoContainer_->setGeometry(infoX, 0, infoWidth, s(kHeight));
+    marquee_->setGeometry(0, s(2), infoWidth, s(18));
+    sourceButton_->setGeometry(0, s(20), infoWidth, s(14));
 
-    controlsContainer_->setGeometry(s(260), 0, s(240), s(kHeight));
+    controlsContainer_->setGeometry(controlsX, 0, s(240), s(kHeight));
     listButton_->setGeometry(0, 0, 0, 0);
     heartButton_->setGeometry(0, 0, s(kButtonWidth), s(kHeight));
     prevButton_->setGeometry(s(45), 0, s(kButtonWidth), s(kHeight));
     playPauseButton_->setGeometry(s(90), 0, s(kButtonWidth), s(kHeight));
     nextButton_->setGeometry(s(135), 0, s(kButtonWidth), s(kHeight));
     const QSize mediaIconSize(s(16), s(16));
+    const QColor transportIconColor = themePalette().foreground;
     prevButton_->setIconSize(mediaIconSize);
     playPauseButton_->setIconSize(mediaIconSize);
     nextButton_->setIconSize(mediaIconSize);
-    prevButton_->setIcon(tintedIcon(style()->standardIcon(QStyle::SP_MediaSkipBackward), mediaIconSize, QColor("#FFFFFF")));
-    nextButton_->setIcon(tintedIcon(style()->standardIcon(QStyle::SP_MediaSkipForward), mediaIconSize, QColor("#FFFFFF")));
+    prevButton_->setIcon(tintedIcon(style()->standardIcon(QStyle::SP_MediaSkipBackward), mediaIconSize, transportIconColor));
+    nextButton_->setIcon(tintedIcon(style()->standardIcon(QStyle::SP_MediaSkipForward), mediaIconSize, transportIconColor));
 
     auto* marqueeWidget = static_cast<TrackMarquee*>(marquee_);
     marqueeWidget->setUiScale(uiScale_);
@@ -349,18 +321,29 @@ void MiniPlayer::applyGeometry() {
 }
 
 void MiniPlayer::applyStyles() {
-    const QString textColorRaw = config::settingString("mini_player_text_color", "#FFFFFF").trimmed();
-    const QString bgColorRaw = config::settingString("mini_player_bg_color", "#111111").trimmed();
-    const QString controlColorRaw = config::settingString("mini_player_control_color", "#000000").trimmed();
+    const auto p = themePalette();
+    const QString textColorRaw = config::settingString("mini_player_text_color", p.foreground.name()).trimmed();
+    const QString bgColorRaw = config::settingString("mini_player_bg_color", p.cardBackground.name()).trimmed();
+    const QString controlColorRaw = config::settingString("mini_player_control_color", p.windowBackground.name()).trimmed();
     const bool transparentMini = config::settingBool("mini_player_transparent", false);
 
-    const QColor textColor = QColor::isValidColor(textColorRaw) ? QColor(textColorRaw) : QColor("#FFFFFF");
-    const QColor bgColor = QColor::isValidColor(bgColorRaw) ? QColor(bgColorRaw) : QColor("#111111");
-    const QColor controlColor = QColor::isValidColor(controlColorRaw) ? QColor(controlColorRaw) : QColor("#000000");
+    const QColor parsedTextColor(textColorRaw);
+    const QColor parsedBgColor(bgColorRaw);
+    const QColor parsedControlColor(controlColorRaw);
+    const QColor textColor = parsedTextColor.isValid() ? parsedTextColor : p.foreground;
+    const QColor bgColor = parsedBgColor.isValid() ? parsedBgColor : p.cardBackground;
+    const QColor controlColor = parsedControlColor.isValid() ? parsedControlColor : p.windowBackground;
 
     const QColor frameColor = transparentMini ? QColor(0, 0, 0, 0) : bgColor;
-    const QColor hoverColor = transparentMini ? QColor(255, 255, 255, 32) : controlColor.lighter(125);
+    QColor hoverColor = transparentMini ? p.hoverBackground : controlColor.lighter(125);
+    if (transparentMini) {
+        hoverColor.setAlpha(96);
+    }
     const QColor controlBase = transparentMini ? QColor(0, 0, 0, 0) : controlColor;
+    QColor sourceBackground = transparentMini ? controlColor : controlColor;
+    if (transparentMini) {
+        sourceBackground.setAlpha(140);
+    }
 
     if (frame_) {
         frame_->setStyleSheet(QString("QFrame#miniFrame { border: none; background-color: %1; }")
@@ -390,6 +373,12 @@ void MiniPlayer::applyStyles() {
         playPauseButton_->setStyleSheet(QString("font-size: %1pt; padding: 0px; background-color: %2; border: none;")
             .arg(std::max(10, static_cast<int>(15 * uiScale_)))
             .arg((transparentMini ? QColor(0, 0, 0, 0) : controlColor.lighter(110)).name(QColor::HexArgb)));
+    }
+    if (sourceButton_) {
+        sourceButton_->setStyleSheet(QString(
+            "font-size: %1pt; text-align: left; padding: 0px 6px; background-color: %2; border: none;")
+            .arg(std::max(6, static_cast<int>(7 * uiScale_)))
+            .arg(sourceBackground.name(QColor::HexArgb)));
     }
 
     updatePlayPauseIcon();
@@ -471,7 +460,7 @@ void MiniPlayer::updatePlayPauseIcon() {
     }
     playPauseButton_->setText(QString());
     const QSize mediaIconSize = playPauseButton_->iconSize().isValid() ? playPauseButton_->iconSize() : QSize(s(16), s(16));
-    const QColor iconColor = isPlaying_ ? QColor(config::HIGHLIGHT_COLOR) : QColor("#FFFFFF");
+    const QColor iconColor = isPlaying_ ? QColor(config::HIGHLIGHT_COLOR) : themePalette().foreground;
     playPauseButton_->setIcon(tintedIcon(style()->standardIcon(isPlaying_ ? QStyle::SP_MediaPause : QStyle::SP_MediaPlay), mediaIconSize, iconColor));
 }
 
@@ -480,9 +469,11 @@ void MiniPlayer::updateHeartVisual() {
         return;
     }
 
-    const QString controlColorRaw = config::settingString("mini_player_control_color", "#000000").trimmed();
+    const auto p = themePalette();
+    const QString controlColorRaw = config::settingString("mini_player_control_color", p.windowBackground.name()).trimmed();
     const bool transparentMini = config::settingBool("mini_player_transparent", false);
-    const QColor controlColor = QColor::isValidColor(controlColorRaw) ? QColor(controlColorRaw) : QColor("#000000");
+    const QColor parsedControlColor(controlColorRaw);
+    const QColor controlColor = parsedControlColor.isValid() ? parsedControlColor : p.windowBackground;
     const QString heartBackground = (transparentMini ? QColor(0, 0, 0, 0) : controlColor).name(QColor::HexArgb);
 
     if (!spotifySource_) {
@@ -498,6 +489,44 @@ void MiniPlayer::updateHeartVisual() {
         .arg(liked ? config::HIGHLIGHT_COLOR : config::INACTIVE_TEXT_COLOR, heartBackground));
 }
 
+void MiniPlayer::setRepeatState(bool enabled, bool supported) {
+    repeatSupported_ = supported;
+    repeatEnabled_ = enabled;
+
+    if (!nextButton_) return;
+    updateRepeatVisual();
+}
+
+void MiniPlayer::updateRepeatVisual() {
+    if (!nextButton_) return;
+
+    const auto p = themePalette();
+    const QString controlColorRaw = config::settingString("mini_player_control_color", p.windowBackground.name()).trimmed();
+    const bool transparentMini = config::settingBool("mini_player_transparent", false);
+    const QColor parsedControlColor(controlColorRaw);
+    const QColor controlColor = parsedControlColor.isValid() ? parsedControlColor : p.windowBackground;
+
+    const QString bg = (transparentMini ? QColor(0,0,0,0).name(QColor::HexArgb) : controlColor.name(QColor::HexArgb));
+
+    if (!repeatSupported_) {
+        nextButton_->setStyleSheet(QString("font-size: %1pt; padding: 0px; background-color: %2; border: none;")
+            .arg(std::max(10, static_cast<int>(15 * uiScale_)))
+            .arg(bg));
+        return;
+    }
+
+    if (repeatEnabled_) {
+        nextButton_->setStyleSheet(QString("font-size: %1pt; padding: 0px; background-color: %2; border: 2px solid %3; border-radius: 6px;")
+            .arg(std::max(10, static_cast<int>(15 * uiScale_)))
+            .arg(bg)
+            .arg(config::HIGHLIGHT_COLOR));
+    } else {
+        nextButton_->setStyleSheet(QString("font-size: %1pt; padding: 0px; background-color: %2; border: none;")
+            .arg(std::max(10, static_cast<int>(15 * uiScale_)))
+            .arg(bg));
+    }
+}
+
 void MiniPlayer::showPlaceholderArt() {
     if (!artButton_) {
         return;
@@ -505,8 +534,9 @@ void MiniPlayer::showPlaceholderArt() {
 
     artButton_->setIcon(QIcon());
     artButton_->setText(QString::fromUtf8("♪"));
-    artButton_->setStyleSheet(QString("font-size: %1pt; color: #888888; background-color: transparent; border: none;")
-                                  .arg(std::max(12, static_cast<int>(20 * uiScale_))));
+    artButton_->setStyleSheet(QString("font-size: %1pt; color: %2; background-color: transparent; border: none;")
+                                  .arg(std::max(12, static_cast<int>(20 * uiScale_)))
+                                  .arg(themePalette().mutedForeground.name()));
 }
 
 void MiniPlayer::loadAlbumArtFromUrl(const QString& url) {

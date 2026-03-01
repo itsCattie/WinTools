@@ -2,6 +2,7 @@
 #include "common/themes/fluent_style.hpp"
 #include "common/themes/theme_helper.hpp"
 #include "common/themes/theme_listener.hpp"
+#include "common/themes/color_utils.hpp"
 #include "common/ui/screen_relative_size.hpp"
 
 #include <QApplication>
@@ -27,15 +28,33 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
-// WinTools: log viewer window manages UI behavior and presentation.
+#include <algorithm>
+#include <cmath>
 
 namespace wintools::logviewer {
 
 static constexpr QColor kColorError   { 0xff, 0x44, 0x44 };
 static constexpr QColor kColorWarning { 0xff, 0x99, 0x00 };
 static constexpr QColor kColorPass    { 0x27, 0xae, 0x60 };
-static constexpr QColor kColorBgError  { 0x3a, 0x10, 0x10 };
-static constexpr QColor kColorBgWarn   { 0x35, 0x28, 0x00 };
+
+using wintools::themes::blendColor;
+using wintools::themes::compositeOver;
+using wintools::themes::contrastRatio;
+using wintools::themes::bestTextColorFor;
+using wintools::themes::cssColor;
+
+QColor severityRowBackground(wintools::logger::Severity sev,
+                             const wintools::themes::ThemePalette& p,
+                             bool dark) {
+    const float alpha = dark ? 0.26f : 0.12f;
+    if (sev == wintools::logger::Severity::Error) {
+        return blendColor(p.windowBackground, p.dangerRed, alpha);
+    }
+    if (sev == wintools::logger::Severity::Warning) {
+        return blendColor(p.windowBackground, p.warningYellow, alpha);
+    }
+    return QColor();
+}
 
 static QString sevLabel(wintools::logger::Severity s) {
     switch (s) {
@@ -98,20 +117,26 @@ QVariant LogTableModel::data(const QModelIndex& index, int role) const {
     }
 
     if (role == Qt::ForegroundRole) {
+        const auto p = wintools::themes::ThemeHelper::currentPalette();
         if (index.column() == ColSeverity) {
             switch (e.severity) {
-            case wintools::logger::Severity::Error:   return QBrush(kColorError);
-            case wintools::logger::Severity::Warning: return QBrush(kColorWarning);
-            case wintools::logger::Severity::Pass:    return QBrush(kColorPass);
+            case wintools::logger::Severity::Error:   return QBrush(p.dangerRed);
+            case wintools::logger::Severity::Warning: return QBrush(p.warningYellow);
+            case wintools::logger::Severity::Pass:    return QBrush(p.successGreen);
             }
         }
         return {};
     }
 
     if (role == Qt::BackgroundRole) {
+        const auto p = wintools::themes::ThemeHelper::currentPalette();
+        const bool dark = wintools::themes::ThemeHelper::isDarkTheme();
         switch (e.severity) {
-        case wintools::logger::Severity::Error:   return QBrush(kColorBgError);
-        case wintools::logger::Severity::Warning: return QBrush(kColorBgWarn);
+        case wintools::logger::Severity::Error:
+        case wintools::logger::Severity::Warning: {
+            const QColor bg = severityRowBackground(e.severity, p, dark);
+            return bg.isValid() ? QBrush(bg) : QBrush();
+        }
         default: return {};
         }
     }
@@ -189,27 +214,39 @@ static QString buildLogViewerQss(const wintools::themes::ThemePalette& p) {
     const QString border  = p.cardBorder.name();
     const QString fg      = p.foreground.name();
     const QString muted   = p.mutedForeground.name();
-    const QString accent  = p.accent.name();
-    const QString hover   = p.hoverBackground.name();
+    const QString accent  = cssColor(p.accent);
+    const QString hover   = cssColor(p.hoverBackground);
+    const QColor sourceSelectedBg = compositeOver(p.cardBackground, p.accent);
+    const QColor sourceHoverBg = compositeOver(p.cardBackground, p.hoverBackground);
+    const QColor sourceSelectedText = bestTextColorFor(sourceSelectedBg, p.foreground, p);
+    const QColor sourceHoverText = bestTextColorFor(sourceHoverBg, p.foreground, p);
 
     const QString supplement = QStringLiteral(
 
         "QListWidget#sourceList { background-color: %1; border: none; outline: none;"
         "  border-right: 1px solid %2; font-size: 12px; }"
         "QListWidget#sourceList::item { color: %3; padding: 6px 14px; border-radius: 6px; margin: 1px 4px; }"
-        "QListWidget#sourceList::item:selected { background-color: %4; color: #ffffff; }"
-        "QListWidget#sourceList::item:hover:!selected { background-color: %5; color: %6; }"
+        "QListWidget#sourceList::item:selected { background-color: %4; color: %8; }"
+        "QListWidget#sourceList::item:hover:!selected { background-color: %5; color: %9; }"
 
         "QTableView { background: %7; alternate-background-color: %1; color: %6; border: none;"
-        "  gridline-color: %2; selection-background-color: %4; selection-color: #fff;"
+        "  gridline-color: %2; selection-background-color: %4; selection-color: %8;"
         "  font-family: 'Cascadia Mono', 'Consolas', monospace; font-size: 12px; outline: 0; }"
         "QHeaderView::section { background: %1; color: %3; padding: 3px 8px; border: none;"
         "  border-right: 1px solid %2; border-bottom: 1px solid %2; font-size: 11px; }"
 
-        "#legendBar { background: %1; border-top: 1px solid %2; }"
-    ).arg(cardBg, border, muted, accent, hover, fg, bg);
+                "#legendBar { background: %1; border-top: 1px solid %2; }"
+        ).arg(cardBg,
+                    border,
+                    muted,
+                    accent,
+                    hover,
+                    fg,
+                    bg,
+                    cssColor(sourceSelectedText),
+                    cssColor(sourceHoverText));
 
-    return FluentStyle::generate(p) + supplement;
+    return supplement;
 }
 
 LogViewerWindow::LogViewerWindow(QWidget* parent)
@@ -227,6 +264,10 @@ LogViewerWindow::LogViewerWindow(QWidget* parent)
 
     buildUi();
     applyTheme();
+
+        m_themeListener = new wintools::themes::ThemeListener(this);
+        connect(m_themeListener, &wintools::themes::ThemeListener::themeChanged,
+            this, [this](bool) { applyTheme(); });
 
     m_model->setEntries(wintools::logger::LogSink::instance()->entries());
     updateLegendCounts();
@@ -333,7 +374,7 @@ void LogViewerWindow::buildSidebar() {
     auto addSep = [&](const QString& text) {
         auto* item = new QListWidgetItem(text, m_sourceList);
         item->setFlags(Qt::NoItemFlags);
-        item->setForeground(QColor(0x55, 0x55, 0x55));
+        item->setForeground(wintools::themes::ThemeHelper::currentPalette().mutedForeground);
         QFont f = item->font();
         f.setPointSize(9);
         f.setBold(true);
@@ -422,7 +463,20 @@ void LogViewerWindow::buildLegend() {
 
 void LogViewerWindow::applyTheme() {
     const auto palette = wintools::themes::ThemeHelper::currentPalette();
-    setStyleSheet(buildLogViewerQss(palette));
+    wintools::themes::ThemeHelper::applyThemeTo(this, buildLogViewerQss(palette));
+
+    for (int i = 0; i < m_sourceList->count(); ++i) {
+        auto* item = m_sourceList->item(i);
+        if (!item) continue;
+        if (item->data(Qt::UserRole + 10).toBool()) {
+            item->setForeground(palette.mutedForeground);
+        }
+    }
+
+    updateLegendCounts();
+    if (m_tableView && m_tableView->viewport()) {
+        m_tableView->viewport()->update();
+    }
 }
 
 void LogViewerWindow::onNewEntry(const wintools::logger::LogEntry& entry) {

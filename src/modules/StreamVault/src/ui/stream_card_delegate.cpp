@@ -1,6 +1,7 @@
 #include "stream_card_delegate.hpp"
 #include "modules/StreamVault/src/core/stream_entry.hpp"
 #include "modules/StreamVault/src/model/stream_model.hpp"
+#include "common/themes/theme_helper.hpp"
 
 #include <QLinearGradient>
 #include <QFontMetrics>
@@ -9,12 +10,11 @@
 #include <QPainterPath>
 #include <QStyleOptionViewItem>
 
-// StreamVault: stream card delegate manages UI behavior and presentation.
-
 namespace wintools::streamvault {
 
 StreamCardDelegate::StreamCardDelegate(QObject* parent)
     : QAbstractItemDelegate(parent)
+    , m_palette(wintools::themes::ThemeHelper::currentPalette())
 {}
 
 QSize StreamCardDelegate::sizeHint(const QStyleOptionViewItem& ,
@@ -36,9 +36,9 @@ void StreamCardDelegate::paint(QPainter*                   painter,
     path.addRoundedRect(card, kRadius, kRadius);
     painter->setClipPath(path);
 
-    QColor bg = sel   ? QColor("#2a475e")
-              : hover ? QColor("#2c3e50")
-                      : QColor("#1f2c38");
+    QColor bg = sel
+        ? m_palette.accent.darker(125)
+        : (hover ? m_palette.hoverBackground : m_palette.cardBackground);
     painter->fillPath(path, bg);
 
     const QRect artRect(card.left(), card.top(), kCardW, kArtH);
@@ -66,14 +66,14 @@ void StreamCardDelegate::paint(QPainter*                   painter,
                          kCardW,
                          kCardH - kArtH);
 
-    painter->fillRect(infoRect, sel ? QColor("#2a475e") : QColor("#1b2838"));
+    painter->fillRect(infoRect, sel ? m_palette.accent.darker(140) : m_palette.windowBackground);
 
     const auto entry = qvariant_cast<StreamEntry>(index.data(StreamEntryRole));
     QFont titleFont = option.font;
     titleFont.setPixelSize(12);
     titleFont.setWeight(QFont::DemiBold);
     painter->setFont(titleFont);
-    painter->setPen(QColor("#c6d4df"));
+    painter->setPen(m_palette.foreground);
 
     QRect titleRect(card.left() + kPadding,
                     card.top() + kArtH + 5,
@@ -86,7 +86,7 @@ void StreamCardDelegate::paint(QPainter*                   painter,
     QFont metaFont = option.font;
     metaFont.setPixelSize(11);
     painter->setFont(metaFont);
-    painter->setPen(QColor("#6a8499"));
+    painter->setPen(m_palette.mutedForeground);
 
     QString metaTypeStr = entry.mediaType == MediaType::Movie ? "Movie"
                         : entry.mediaType == MediaType::TvShow ? "TV Series"
@@ -111,7 +111,7 @@ void StreamCardDelegate::paint(QPainter*                   painter,
 
     if (sel || hover) {
         painter->setClipping(false);
-        QPen borderPen(sel ? QColor("#66c0f4") : QColor("#4a6174"), 1.5);
+        QPen borderPen(sel ? m_palette.accent : m_palette.cardBorder, 1.5);
         painter->setPen(borderPen);
         painter->setBrush(Qt::NoBrush);
         painter->drawRoundedRect(card.adjusted(1, 1, -1, -1), kRadius, kRadius);
@@ -122,18 +122,18 @@ void StreamCardDelegate::paint(QPainter*                   painter,
 
 void StreamCardDelegate::drawPlaceholder(QPainter*      p,
                                           const QRect&   artRect,
-                                          const QString& title) {
+                                          const QString& title) const {
 
     QLinearGradient grad(artRect.topLeft(), artRect.bottomLeft());
-    grad.setColorAt(0.0, QColor("#2c3e50"));
-    grad.setColorAt(1.0, QColor("#1a252f"));
+    grad.setColorAt(0.0, m_palette.cardBackground.lighter(110));
+    grad.setColorAt(1.0, m_palette.windowBackground.darker(110));
     p->fillRect(artRect, grad);
 
     QFont f;
     f.setPixelSize(28);
     f.setWeight(QFont::Bold);
     p->setFont(f);
-    p->setPen(QColor("#3d5166"));
+    p->setPen(m_palette.mutedForeground.darker(110));
 
     QString initials;
     for (const QString& word : title.split(' ', Qt::SkipEmptyParts)) {

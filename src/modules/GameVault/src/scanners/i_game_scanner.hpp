@@ -1,7 +1,5 @@
 #pragma once
 
-// GameVault: i game scanner manages discovery and scanning flow.
-
 #include "../core/game_entry.hpp"
 #include <QVector>
 

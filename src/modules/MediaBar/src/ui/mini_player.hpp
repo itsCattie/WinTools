@@ -1,7 +1,5 @@
 #pragma once
 
-// MediaBar: mini player manages UI behavior and presentation.
-
 #include <QWidget>
 
 #include <optional>
@@ -30,6 +28,7 @@ public:
     void setPlaying(bool playing);
     void setAlbumArtUrl(const QString& url);
     void setLikedState(std::optional<bool> liked, bool spotifySource);
+    void setRepeatState(bool enabled, bool supported);
 
     void showDesktopMini();
     void hideDesktopMini();
@@ -43,6 +42,7 @@ private:
     int s(int value) const;
     void updatePlayPauseIcon();
     void updateHeartVisual();
+    void updateRepeatVisual();
     void showPlaceholderArt();
     void loadAlbumArtFromUrl(const QString& url);
     void keepWindowTopmost();
@@ -78,6 +78,8 @@ private:
     QString currentAlbumArtUrl_;
     bool isPlaying_ = false;
     bool spotifySource_ = false;
+    bool repeatSupported_ = false;
+    bool repeatEnabled_ = false;
     bool desktopMiniEnabled_ = false;
     bool autoHiddenByTaskbar_ = false;
     std::optional<bool> likedState_;

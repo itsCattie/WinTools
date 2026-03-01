@@ -1,7 +1,5 @@
 #pragma once
 
-// StreamVault: stream model manages model/view data shaping.
-
 #include "modules/StreamVault/src/core/stream_entry.hpp"
 
 #include <QAbstractListModel>

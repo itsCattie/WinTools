@@ -1,7 +1,5 @@
 #pragma once
 
-// AdvancedTaskManager: task manager window manages UI behavior and presentation.
-
 #include <QDialog>
 #include <QMap>
 #include <QVector>
@@ -11,17 +9,22 @@
 class QTabWidget;
 class QTreeView;
 class QTableView;
+class QTableWidget;
 class QLineEdit;
 class QPushButton;
 class QLabel;
 class QTimer;
 class QMenu;
+class QAction;
 class QHeaderView;
 class QSortFilterProxyModel;
 class QGroupBox;
 class QVBoxLayout;
 class QGridLayout;
 class QStackedWidget;
+namespace wintools::themes { struct ThemePalette; class ThemeListener; }
+
+class QStandardItemModel;
 
 namespace wintools::taskmanager {
 
@@ -56,14 +59,18 @@ private slots:
     void onTabChanged(int index);
 
     void togglePerfView();
+    void toggleProfilerOverlay(bool enabled);
+    void showProfilerOverlayMenu();
 
 private:
     void buildUi();
     void buildProcessesTab();
     void buildPerformanceTab();
     void buildDetailsTab();
+    void buildServicesTab();
+    void buildStartupTab();
     void buildStatusBar();
-    void applyDarkTheme();
+    void applyTheme(const wintools::themes::ThemePalette& palette);
 
     void createDiskGraph(const QString& driveLetter,
                           const QString& volumeLabel = {});
@@ -81,14 +88,19 @@ private:
 
     QTreeView*   m_processTree   = nullptr;
     QLineEdit*   m_treeSearch    = nullptr;
+    QLabel*      m_procUsageSummary = nullptr;
     QPushButton* m_btnEndTask    = nullptr;
     QPushButton* m_btnEndTree    = nullptr;
     QPushButton* m_btnSuspend    = nullptr;
     QPushButton* m_btnResume     = nullptr;
 
     PerfGraphWidget* m_cpuGraph  = nullptr;
+    PerfGraphWidget* m_gpuGraph  = nullptr;
     PerfGraphWidget* m_memGraph  = nullptr;
     QLabel* m_lblCpuUsage        = nullptr;
+    QLabel* m_lblGpuUsage        = nullptr;
+    QLabel* m_lblGpuGraphUsage   = nullptr;
+    QTableWidget* m_gpuProcessTable = nullptr;
     QLabel* m_lblMemUsage        = nullptr;
     QLabel* m_lblMemDetails      = nullptr;
     QLabel* m_lblUptime          = nullptr;
@@ -113,6 +125,7 @@ private:
     QLabel*          m_lblNetSent   = nullptr;
 
     QGroupBox*       m_cpuGroup   = nullptr;
+    QGroupBox*       m_gpuGroup   = nullptr;
     QGroupBox*       m_memGroup   = nullptr;
     QGroupBox*       m_netGroup   = nullptr;
 
@@ -120,19 +133,36 @@ private:
     QVBoxLayout*     m_perfScrollLayout = nullptr;
     QGridLayout*     m_perfTileGrid     = nullptr;
     QPushButton*     m_perfViewToggle   = nullptr;
+    QPushButton*     m_overlayToggle    = nullptr;
+    QPushButton*     m_overlaySettings  = nullptr;
+    QMenu*           m_overlayMenu      = nullptr;
+    QAction*         m_overlayShowNetAction  = nullptr;
+    QAction*         m_overlayShowDiskAction = nullptr;
     bool             m_tileView         = false;
 
     QTableView* m_detailsTable   = nullptr;
     QLineEdit*  m_detailsSearch  = nullptr;
 
+    QTableView*        m_servicesTable  = nullptr;
+    QLineEdit*         m_servicesSearch = nullptr;
+    QStandardItemModel* m_servicesModel = nullptr;
+    QSortFilterProxyModel* m_servicesProxy = nullptr;
+
+    QTableView*        m_startupTable  = nullptr;
+    QLineEdit*         m_startupSearch = nullptr;
+    QStandardItemModel* m_startupModel = nullptr;
+    QSortFilterProxyModel* m_startupProxy = nullptr;
+
     QLabel* m_statusProcesses    = nullptr;
     QLabel* m_statusThreads      = nullptr;
     QLabel* m_statusCpu          = nullptr;
+    QLabel* m_statusGpu          = nullptr;
     QLabel* m_statusMemory       = nullptr;
 
     int m_currentTab = 0;
 
     SystemPerf m_lastSysPerf;
+    wintools::themes::ThemeListener* m_themeListener = nullptr;
 };
 
 }

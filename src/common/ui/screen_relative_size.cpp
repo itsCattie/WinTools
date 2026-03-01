@@ -7,8 +7,6 @@
 
 #include <cmath>
 
-// WinTools: screen relative size manages UI behavior and presentation.
-
 namespace wintools::ui {
 
 namespace {

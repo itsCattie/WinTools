@@ -1,7 +1,5 @@
 #pragma once
 
-// MediaBar: config manages core logic and state.
-
 #include <QJsonObject>
 #include <QString>
 

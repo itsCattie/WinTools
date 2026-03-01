@@ -1,8 +1,7 @@
 #pragma once
 
-// WinTools: theme listener manages shared infrastructure.
-
 #include <QObject>
+#include "common/themes/theme_helper.hpp"
 
 class QTimer;
 
@@ -22,6 +21,7 @@ private slots:
 
 private:
     bool m_isDarkTheme;
+    ThemeHelper::ThemeMode m_mode;
     QTimer* m_timer;
 };
 

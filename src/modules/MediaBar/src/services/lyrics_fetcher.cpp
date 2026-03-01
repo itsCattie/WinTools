@@ -10,8 +10,6 @@
 #include <QThread>
 #include <QUrlQuery>
 
-// MediaBar: lyrics fetcher manages supporting service operations.
-
 namespace {
 
 constexpr qint64 INSTRUMENTAL_GAP_THRESHOLD_MS = 5000;

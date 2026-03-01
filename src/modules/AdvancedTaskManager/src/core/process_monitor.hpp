@@ -1,9 +1,10 @@
 #pragma once
 
-// AdvancedTaskManager: process monitor manages core logic and state.
-
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <pdh.h>
+#endif
 
 #include <QHash>
 #include <QObject>
@@ -43,11 +44,14 @@ private slots:
     void refresh();
 
 private:
+#ifdef _WIN32
+    void ensureGpuCounter();
 
     QSet<quint32>   enumGuiPids() const;
     static QString  queryProcessPath(HANDLE hProc);
     static QString  queryProcessUser(HANDLE hProc);
     static ProcessCategory categorize(const ProcessInfo& pi, const QSet<quint32>& guiPids);
+#endif
 
     struct ProcTimes {
         quint64 kernelTime = 0;
@@ -70,12 +74,21 @@ private:
 
     quint64 m_prevNetRecvBytes = 0;
     quint64 m_prevNetSentBytes = 0;
+
+#ifdef _WIN32
+    PDH_HQUERY   m_gpuQuery   = nullptr;
+    PDH_HCOUNTER m_gpuCounter = nullptr;
+    bool         m_gpuReady   = false;
+#endif
+
     QTimer* m_timer = nullptr;
 
+#ifdef _WIN32
     using NtSuspendFn = LONG (WINAPI*)(HANDLE);
     using NtResumeFn  = LONG (WINAPI*)(HANDLE);
     NtSuspendFn m_ntSuspend = nullptr;
     NtResumeFn  m_ntResume  = nullptr;
+#endif
 };
 
 }

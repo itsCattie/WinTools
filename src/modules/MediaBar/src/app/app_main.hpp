@@ -1,7 +1,5 @@
 #pragma once
 
-// MediaBar: app main manages feature behavior.
-
 #include "gui.hpp"
 #include "lyrics_fetcher.hpp"
 #include "mini_player.hpp"
@@ -43,6 +41,8 @@ private:
     void showSearchDialog();
     void showSpotifyLibraryDialog();
     void showSpotifyDevicesDialog();
+    void showSonosZonesDialog();
+    void showSonosFavouritesDialog();
     void showLocalLibraryDialog();
     void showQueueDialog();
     void showAppearanceDialog();
@@ -75,6 +75,7 @@ private:
     bool miniMode_ = false;
     std::optional<bool> currentTrackLiked_;
     std::optional<bool> currentShuffleEnabled_;
+    std::optional<bool> currentRepeatEnabled_;
     QString currentShuffleSource_;
     QString currentLikedTrackId_;
     PlaybackInfo latestPlayback_;

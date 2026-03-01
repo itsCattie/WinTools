@@ -1,7 +1,5 @@
 #pragma once
 
-// DiskSentinel: disk node manages core logic and state.
-
 #include <QHash>
 #include <QString>
 #include <QVector>

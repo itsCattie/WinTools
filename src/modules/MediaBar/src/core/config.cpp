@@ -8,8 +8,6 @@
 #include <QJsonDocument>
 #include <QStandardPaths>
 
-// MediaBar: config manages core logic and state.
-
 namespace {
 
 QString ensureDir(const QString& path) {
@@ -18,7 +16,10 @@ QString ensureDir(const QString& path) {
         dir.mkpath(".");
     }
     return dir.absolutePath();
-}
+    }
+
+static bool s_cacheValid = false;
+static QJsonObject s_cachedSettings;
 
 }
 
@@ -62,14 +63,15 @@ QJsonObject defaultSettings() {
     obj.insert("mini_player_control_color", "#000000");
     obj.insert("mini_player_text_color", "#FFFFFF");
     obj.insert("sonos_speaker_ip", "");
-    obj.insert("playback_source", "auto");
+    obj.insert("playback_source", "spotify");
     obj.insert("search_sources", QJsonArray{QString("spotify"), QString("sonos")});
     obj.insert("favorite_items", QJsonArray{});
     return obj;
 }
 
 QJsonObject loadSettings() {
-    debuglog::trace("Config", QString("loadSettings path=%1").arg(settingsFilePath()));
+    if (s_cacheValid) return s_cachedSettings;
+
     const QString path = settingsFilePath();
     QFile file(path);
     QJsonObject defaults = defaultSettings();
@@ -98,11 +100,12 @@ QJsonObject loadSettings() {
     for (auto it = user.begin(); it != user.end(); ++it) {
         merged.insert(it.key(), it.value());
     }
+    s_cachedSettings = merged;
+    s_cacheValid = true;
     return merged;
 }
 
 bool saveSettings(const QJsonObject& settings) {
-    debuglog::trace("Config", QString("saveSettings path=%1").arg(settingsFilePath()));
     QFile file(settingsFilePath());
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         debuglog::error("Config", "Failed to open settings file for write.");
@@ -110,6 +113,9 @@ bool saveSettings(const QJsonObject& settings) {
     }
     file.write(QJsonDocument(settings).toJson(QJsonDocument::Indented));
     file.close();
+
+    s_cachedSettings = settings;
+    s_cacheValid = true;
     debuglog::info("Config", "Settings saved.");
     return true;
 }

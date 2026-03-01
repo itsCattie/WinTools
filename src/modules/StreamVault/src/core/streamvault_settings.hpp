@@ -1,8 +1,9 @@
 #pragma once
 
-// StreamVault: streamvault settings manages core logic and state.
+#include "modules/StreamVault/src/core/streaming_service.hpp"
 
 #include <QString>
+#include <QVector>
 
 namespace wintools::streamvault {
 
@@ -18,6 +19,9 @@ public:
 
     QString defaultLanguage() const;
     void    setDefaultLanguage(const QString& lang);
+
+    QVector<ServiceInfo> customServices() const;
+    void                 setCustomServices(const QVector<ServiceInfo>& services);
 
     static QString posterBaseUrl();
     static QString backdropBaseUrl();

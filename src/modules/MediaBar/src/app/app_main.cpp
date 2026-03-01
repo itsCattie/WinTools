@@ -3,6 +3,8 @@
 #include "config.hpp"
 #include "debug_logger.hpp"
 #include "lyrics_timing.hpp"
+#include "common/themes/theme_helper.hpp"
+#include "common/themes/color_utils.hpp"
 
 #include <QApplication>
 #include <QComboBox>
@@ -19,8 +21,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QJsonValue>
 #include <QFrame>
+#include <QHash>
 #include <QLabel>
 #include <QListWidget>
 #include <QLineEdit>
@@ -48,10 +50,67 @@
 #include <QStandardPaths>
 #include <QDesktopServices>
 #include <functional>
-
-// MediaBar: app main manages feature behavior.
+#include <cmath>
 
 namespace {
+
+using wintools::themes::blendColor;
+using wintools::themes::compositeOver;
+using wintools::themes::contrastRatio;
+using wintools::themes::bestTextColorFor;
+using wintools::themes::tintedIcon;
+
+QString sanitizeOverlayTitle(QString title) {
+    title = title.trimmed();
+    while (!title.isEmpty() && !title.at(0).isLetterOrNumber()) {
+        title.remove(0, 1);
+    }
+    return title.trimmed();
+}
+
+QString overlayTitleIconPathFor(const QString& titleText) {
+    const QString key = titleText.toLower();
+    if (key.contains("spotify library") || key.contains("local library")) {
+        return ":/icons/mediabar/library.svg";
+    }
+    if (key.contains("search")) {
+        return ":/icons/mediabar/search.svg";
+    }
+    if (key.contains("devices")) {
+        return ":/icons/mediabar/devices.svg";
+    }
+    if (key.contains("queue")) {
+        return ":/icons/mediabar/queue.svg";
+    }
+    if (key.contains("mini player style") || key.contains("appearance")) {
+        return ":/icons/mediabar/appearance.svg";
+    }
+    if (key.contains("library path")) {
+        return ":/icons/mediabar/library_path.svg";
+    }
+    if (key.contains("debug")) {
+        return ":/icons/mediabar/debug.svg";
+    }
+    return ":/icons/modules/mediabar.svg";
+}
+
+QString buildMiniPopupMenuQss(const wintools::themes::ThemePalette& palette) {
+
+    const QColor menuBg  = palette.cardBackground;
+    const QColor hoverBg = compositeOver(palette.cardBackground, palette.hoverBackground);
+
+    return QStringLiteral(
+        "QMenu { background-color: %1; color: %2; border: 1px solid %3; border-radius: 8px; padding: 4px; }"
+        "QMenu::item { padding: 6px 24px 6px 12px; border-radius: 4px; }"
+        "QMenu::item:selected { background-color: %4; }"
+        "QMenu::item:disabled { color: %5; }"
+        "QMenu::separator { height: 1px; background: %3; margin: 4px 8px; }")
+        .arg(menuBg.name(),
+            palette.foreground.name(),
+            palette.cardBorder.name(),
+            hoverBg.name(),
+            palette.mutedForeground.name());
+}
 
 struct BoolResetGuard {
     bool& flag;
@@ -124,6 +183,16 @@ QPoint menuPointAboveWidget(QWidget* owner, QWidget* anchor, const QSize& menuSi
 }
 
 QVBoxLayout* createOverlayPanel(QDialog& dialog, QWidget* parent, const QString& title, int panelWidth, int panelMinHeight = 220) {
+    const auto palette = wintools::themes::ThemeHelper::currentPalette();
+    const bool isDark = palette.windowBackground.lightness() < 128;
+    const QColor primaryTextColor = bestTextColorFor(palette.accent, palette.foreground, palette);
+    const QColor listHoverBg = blendColor(palette.cardBackground, palette.hoverBackground, isDark ? 0.30f : 0.18f);
+    const QColor listSelectedBg = blendColor(palette.cardBackground, palette.accent, isDark ? 0.28f : 0.16f);
+    const QColor listHoverText = bestTextColorFor(listHoverBg, palette.foreground, palette);
+    const QColor listSelectedText = bestTextColorFor(listSelectedBg, palette.foreground, palette);
+    QColor scrim = palette.shadow;
+    scrim.setAlpha(160);
+
     dialog.setParent(parent);
     dialog.setModal(true);
     dialog.setWindowModality(Qt::WindowModal);
@@ -131,19 +200,19 @@ QVBoxLayout* createOverlayPanel(QDialog& dialog, QWidget* parent, const QString&
     dialog.setWindowFlag(Qt::FramelessWindowHint, true);
     dialog.setAttribute(Qt::WA_TranslucentBackground, true);
     dialog.setStyleSheet(QString(
-        "QDialog { background-color: rgba(0,0,0,160); }"
+        "QDialog { background-color: %10; }"
         "QFrame#overlayPanel { background-color: %1; border: 1px solid %2; border-radius: 16px; }"
-        "QLabel#overlayTitle { color: %3; font-size: 15pt; font-weight: 700; padding-bottom: 4px; }"
-        "QLabel#overlayBody { color: %4; font-size: 10pt; line-height: 1.4; }"
-        "QLabel#overlaySection { color: %4; font-size: 8pt; font-weight: 600; letter-spacing: 1px; padding-top: 8px; }"
+        "QLabel#overlayTitle { color: %3; font-size: 15pt; font-weight: 700; padding-bottom: 4px; background: transparent; }"
+        "QLabel#overlayBody { color: %4; font-size: 10pt; line-height: 1.4; background: transparent; }"
+        "QLabel#overlaySection { color: %4; font-size: 8pt; font-weight: 600; letter-spacing: 1px; padding-top: 8px; background: transparent; }"
         "QPushButton { background-color: %7; color: %3; border: none; border-radius: 10px; padding: 9px 16px; font-size: 10pt; }"
         "QPushButton:hover { background-color: %5; }"
-        "QPushButton#primary { background-color: %6; color: #111; border: none; border-radius: 10px; font-weight: 700; }"
+        "QPushButton#primary { background-color: %6; color: %9; border: none; border-radius: 10px; font-weight: 700; }"
         "QPushButton#primary:hover { background-color: %8; }"
-        "QListWidget { background-color: %7; color: %3; border: none; border-radius: 10px; padding: 4px; }"
+        "QListWidget { background-color: %7; color: %3; border: none; border-radius: 10px; padding: 4px; outline: none; }"
         "QListWidget::item { padding: 10px 12px; border-radius: 8px; }"
-        "QListWidget::item:hover { background-color: %5; }"
-        "QListWidget::item:selected { background-color: %5; color: %3; }"
+        "QListWidget::item:hover { background-color: %11; color: %12; }"
+        "QListWidget::item:selected { background-color: %13; color: %14; border: none; outline: none; }"
         "QLineEdit, QTextEdit, QDoubleSpinBox { background-color: %7; color: %3; border: 1px solid %2; border-radius: 10px; padding: 9px 12px; font-size: 10pt; }"
         "QLineEdit:focus, QTextEdit:focus { border-color: %6; }"
         "QCheckBox { color: %3; font-size: 10pt; spacing: 8px; }"
@@ -154,14 +223,20 @@ QVBoxLayout* createOverlayPanel(QDialog& dialog, QWidget* parent, const QString&
         "QScrollBar::handle:vertical:hover { background: %4; }"
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
         "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }")
-        .arg(config::SURFACE_COLOR,
-             config::BORDER_COLOR,
-             config::TEXT_COLOR,
-             config::INACTIVE_TEXT_COLOR,
-             config::SURFACE_HOVER,
-             config::HIGHLIGHT_COLOR,
-             config::CARD_COLOR,
-             config::HIGHLIGHT_HOVER));
+           .arg(palette.cardBackground.name(),
+               palette.cardBorder.name(),
+               palette.foreground.name(),
+               palette.mutedForeground.name(),
+               palette.hoverBackground.name(),
+               palette.accent.name(),
+               palette.windowBackground.name(),
+               palette.accent.lighter(115).name(),
+               primaryTextColor.name(),
+               scrim.name(QColor::HexArgb),
+               listHoverBg.name(),
+               listHoverText.name(),
+               listSelectedBg.name(),
+               listSelectedText.name()));
 
     const QSize fallbackSize(panelWidth + 80, panelMinHeight + 100);
     dialog.resize(parent ? parent->size() : fallbackSize);
@@ -183,9 +258,24 @@ QVBoxLayout* createOverlayPanel(QDialog& dialog, QWidget* parent, const QString&
     panelLayout->setContentsMargins(20, 20, 20, 20);
     panelLayout->setSpacing(12);
 
-    auto* titleLabel = new QLabel(title, panel);
+    const QString cleanTitle = sanitizeOverlayTitle(title);
+    auto* titleRow = new QHBoxLayout();
+    titleRow->setContentsMargins(0, 0, 0, 0);
+    titleRow->setSpacing(10);
+
+    auto* titleIcon = new QLabel(panel);
+    const QString iconPath = overlayTitleIconPathFor(cleanTitle);
+    const QIcon icon(iconPath);
+    titleIcon->setFixedSize(26, 26);
+    if (!icon.isNull()) {
+        titleIcon->setPixmap(tintedIcon(icon, QSize(24, 24), palette.foreground).pixmap(24, 24));
+    }
+
+    auto* titleLabel = new QLabel(cleanTitle, panel);
     titleLabel->setObjectName("overlayTitle");
-    panelLayout->addWidget(titleLabel);
+    titleRow->addWidget(titleIcon);
+    titleRow->addWidget(titleLabel, 1);
+    panelLayout->addLayout(titleRow);
 
     row->addWidget(panel);
     row->addStretch(1);
@@ -280,6 +370,7 @@ int showOverlaySelectionDialog(QWidget* parent,
 
     auto* list = new QListWidget(&dialog);
     list->addItems(items);
+    list->setFocusPolicy(Qt::NoFocus);
     list->setCurrentRow(0);
     layout->addWidget(list, 1);
 
@@ -319,6 +410,7 @@ int showOverlaySelectionDialogLazy(QWidget* parent,
 
     auto* list = new QListWidget(&dialog);
     list->addItem("Loading...");
+    list->setFocusPolicy(Qt::NoFocus);
     list->setEnabled(false);
     layout->addWidget(list, 1);
 
@@ -363,7 +455,8 @@ int showOverlaySelectionDialogLazy(QWidget* parent,
 
 enum class CatalogActionChoice {
     PlayNow,
-    Queue
+    Queue,
+    Browse
 };
 
 struct CatalogDisplayItem {
@@ -379,17 +472,15 @@ struct CatalogPickResult {
 };
 
 QIcon fallbackCircleIcon(const QString& glyph) {
+    const auto palette = wintools::themes::ThemeHelper::currentPalette();
     QPixmap pixmap(40, 40);
     pixmap.fill(Qt::transparent);
 
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setBrush(QColor(config::CARD_COLOR));
-    painter.setPen(Qt::NoPen);
-    painter.drawEllipse(pixmap.rect().adjusted(1, 1, -1, -1));
-    painter.setPen(QColor(config::TEXT_COLOR));
+    painter.setPen(palette.foreground);
     QFont font = painter.font();
-    font.setPointSize(13);
+    font.setPointSize(14);
     font.setBold(true);
     painter.setFont(font);
     painter.drawText(pixmap.rect(), Qt::AlignCenter, glyph);
@@ -397,9 +488,17 @@ QIcon fallbackCircleIcon(const QString& glyph) {
 }
 
 QIcon iconForImageUrl(QNetworkAccessManager& network, const QString& imageUrl, const QString& fallbackGlyph) {
+
+    static QHash<QString, QIcon> iconCache;
+    static constexpr int kMaxCacheEntries = 200;
+
     const QString normalized = imageUrl.trimmed();
     if (normalized.isEmpty()) {
         return fallbackCircleIcon(fallbackGlyph);
+    }
+
+    if (iconCache.contains(normalized)) {
+        return iconCache.value(normalized);
     }
 
     QNetworkReply* reply = network.get(QNetworkRequest(QUrl(normalized)));
@@ -419,7 +518,14 @@ QIcon iconForImageUrl(QNetworkAccessManager& network, const QString& imageUrl, c
         return fallbackCircleIcon(fallbackGlyph);
     }
 
-    return QIcon(pix.scaled(40, 40, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+    QIcon icon(pix.scaled(40, 40, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+
+    if (iconCache.size() >= kMaxCacheEntries) {
+        iconCache.clear();
+    }
+    iconCache.insert(normalized, icon);
+
+    return icon;
 }
 
 std::optional<CatalogPickResult> showOverlayCatalogPicker(
@@ -429,7 +535,8 @@ std::optional<CatalogPickResult> showOverlayCatalogPicker(
     const QString& prompt,
     const std::function<QVector<CatalogDisplayItem>(const std::function<void(const QString&)>& reportProgress)>& loader,
     const QString& playNowLabel,
-    const QString& queueLabel) {
+    const QString& queueLabel,
+    const QString& browseLabel = QString()) {
     QDialog dialog(parent);
     auto* layout = createOverlayPanel(dialog, parent, title, 760, 520);
 
@@ -445,6 +552,7 @@ std::optional<CatalogPickResult> showOverlayCatalogPicker(
 
     auto* list = new QListWidget(&dialog);
     list->setIconSize(QSize(40, 40));
+    list->setFocusPolicy(Qt::NoFocus);
     list->setEnabled(false);
     layout->addWidget(list, 1);
 
@@ -452,11 +560,17 @@ std::optional<CatalogPickResult> showOverlayCatalogPicker(
     actions->addStretch(1);
     auto* closeButton = new QPushButton("Close", &dialog);
     auto* queueButton = new QPushButton(queueLabel, &dialog);
+    QPushButton* browseButton = nullptr;
+    if (!browseLabel.isEmpty()) {
+        browseButton = new QPushButton(browseLabel, &dialog);
+        browseButton->setEnabled(false);
+    }
     auto* playButton = new QPushButton(playNowLabel, &dialog);
     playButton->setObjectName("primary");
     queueButton->setEnabled(false);
     playButton->setEnabled(false);
     actions->addWidget(closeButton);
+    if (browseButton) actions->addWidget(browseButton);
     actions->addWidget(queueButton);
     actions->addWidget(playButton);
     layout->addLayout(actions);
@@ -487,10 +601,7 @@ std::optional<CatalogPickResult> showOverlayCatalogPicker(
 
             auto* item = new QListWidgetItem(line);
             item->setData(Qt::UserRole, i);
-            const QString fallbackGlyph = entry.badge.startsWith("Artist", Qt::CaseInsensitive) ? QString::fromUtf8("🎤") :
-                                          entry.badge.startsWith("Album", Qt::CaseInsensitive) ? QString::fromUtf8("💿") :
-                                          entry.badge.startsWith("Playlist", Qt::CaseInsensitive) ? QString::fromUtf8("📜") :
-                                          QString::fromUtf8("🎵");
+            const QString fallbackGlyph = entry.badge.left(1).toUpper();
             item->setIcon(iconForImageUrl(imageNetwork, entry.imageUrl, fallbackGlyph));
             list->addItem(item);
         }
@@ -498,6 +609,7 @@ std::optional<CatalogPickResult> showOverlayCatalogPicker(
         const bool hasItems = list->count() > 0;
         queueButton->setEnabled(hasItems);
         playButton->setEnabled(hasItems);
+        if (browseButton) browseButton->setEnabled(hasItems);
         if (hasItems) {
             list->setCurrentRow(0);
         }
@@ -524,6 +636,16 @@ std::optional<CatalogPickResult> showOverlayCatalogPicker(
         result = CatalogPickResult{item->data(Qt::UserRole).toInt(), CatalogActionChoice::Queue};
         dialog.accept();
     });
+    if (browseButton) {
+        QObject::connect(browseButton, &QPushButton::clicked, &dialog, [&]() {
+            auto* item = list->currentItem();
+            if (!item) {
+                return;
+            }
+            result = CatalogPickResult{item->data(Qt::UserRole).toInt(), CatalogActionChoice::Browse};
+            dialog.accept();
+        });
+    }
     QObject::connect(list, &QListWidget::itemDoubleClicked, &dialog, [&](QListWidgetItem* item) {
         if (!item) {
             return;
@@ -568,7 +690,7 @@ std::optional<QString> showQueueTargetPicker(QWidget* parent) {
     };
 
     const int index = showOverlaySelectionDialog(parent,
-        QString::fromUtf8("📋 Queue Target"),
+        "Queue Target",
         "Choose where to queue this item:",
         options,
         "Select");
@@ -589,7 +711,7 @@ void LyricsApp::initInProcess() {
     mainWindow_->setWindowIcon(QIcon(":/icons/modules/mediabar.svg"));
     miniPlayerWindow_ = new MiniPlayer(nullptr);
 
-    const QString initialSourceMode = config::settingString("playback_source", "auto");
+    const QString initialSourceMode = config::settingString("playback_source", "spotify");
     client_.setSourceModeFromString(initialSourceMode);
     mainWindow_->setSourceMode(client_.sourceModeToString());
 
@@ -604,16 +726,16 @@ void LyricsApp::initInProcess() {
     mainWindow_->show();
     wireMainWindowActions();
 
-    QObject::connect(mainWindow_->prevButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::prevRequested, [this]() {
         client_.previousTrack();
     });
-    QObject::connect(mainWindow_->playPauseButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::playPauseRequested, [this]() {
         client_.playPause();
     });
-    QObject::connect(mainWindow_->nextButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::nextRequested, [this]() {
         client_.nextTrack();
     });
-    QObject::connect(mainWindow_->shuffleButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::shuffleRequested, [this]() {
         const auto toggled = client_.toggleShuffle();
         if (toggled.has_value()) {
             currentShuffleEnabled_ = toggled;
@@ -621,10 +743,32 @@ void LyricsApp::initInProcess() {
             mainWindow_->setShuffleState(toggled.value(), true);
         }
     });
-    QObject::connect(mainWindow_->miniModeButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::repeatRequested, [this]() {
+
+        const bool target = !currentRepeatEnabled_.value_or(false);
+        const auto result = client_.setRepeatState(target);
+        if (result.has_value()) {
+            currentRepeatEnabled_ = result.value();
+
+            currentShuffleSource_ = "spotify";
+            mainWindow_->setRepeatState(result.value(), true);
+            if (miniPlayerWindow_) {
+                miniPlayerWindow_->setRepeatState(result.value(), true);
+            }
+        } else {
+
+            const bool newVal = target;
+            currentRepeatEnabled_ = newVal;
+            mainWindow_->setRepeatState(newVal, false);
+            if (miniPlayerWindow_) {
+                miniPlayerWindow_->setRepeatState(newVal, false);
+            }
+        }
+    });
+    QObject::connect(mainWindow_, &LyricsWindow::miniModeRequested, [this]() {
         toggleMiniMode();
     });
-    QObject::connect(mainWindow_->favoriteButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::favoriteRequested, [this]() {
         toggleCurrentTrackLike();
     });
 
@@ -652,7 +796,7 @@ void LyricsApp::initInProcess() {
     QObject::connect(pollingTimer_, &QTimer::timeout, [this]() {
         refreshPlayback();
     });
-    // Playback polling can be slower: it may trigger API/network work and lyrics fetches.
+
     pollingTimer_->start(kPlaybackPollIntervalMs_);
 
     uiTimer_ = new QTimer(mainWindow_);
@@ -660,7 +804,7 @@ void LyricsApp::initInProcess() {
     QObject::connect(uiTimer_, &QTimer::timeout, [this]() {
         updateUi();
     });
-    // UI refresh stays fast and lightweight: it extrapolates progress from cached snapshots.
+
     uiTimer_->start(kUiRefreshIntervalMs_);
 
     QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, [this]() {
@@ -678,7 +822,7 @@ void LyricsApp::initInProcess() {
     refreshPlayback();
     debuglog::info("App", "MediaBar in-process init complete.");
 
-    if (initialSourceMode == "auto" || initialSourceMode == "spotify") {
+    if (initialSourceMode == "spotify") {
         ensureSpotifyRunning();
     }
 }
@@ -706,7 +850,7 @@ int LyricsApp::run(int argc, char** argv) {
     miniPlayerWindow_ = new MiniPlayer(nullptr);
     setupTray();
 
-    const QString initialSourceMode = config::settingString("playback_source", "auto");
+    const QString initialSourceMode = config::settingString("playback_source", "spotify");
     client_.setSourceModeFromString(initialSourceMode);
     mainWindow_->setSourceMode(client_.sourceModeToString());
 
@@ -738,16 +882,16 @@ int LyricsApp::run(int argc, char** argv) {
         }
     }
 
-    QObject::connect(mainWindow_->prevButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::prevRequested, [this]() {
         client_.previousTrack();
     });
-    QObject::connect(mainWindow_->playPauseButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::playPauseRequested, [this]() {
         client_.playPause();
     });
-    QObject::connect(mainWindow_->nextButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::nextRequested, [this]() {
         client_.nextTrack();
     });
-    QObject::connect(mainWindow_->shuffleButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::shuffleRequested, [this]() {
         const auto toggled = client_.toggleShuffle();
         if (toggled.has_value()) {
             currentShuffleEnabled_ = toggled;
@@ -756,10 +900,10 @@ int LyricsApp::run(int argc, char** argv) {
         }
     });
 
-    QObject::connect(mainWindow_->miniModeButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::miniModeRequested, [this]() {
         toggleMiniMode();
     });
-    QObject::connect(mainWindow_->favoriteButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::favoriteRequested, [this]() {
         toggleCurrentTrackLike();
     });
 
@@ -828,7 +972,6 @@ void LyricsApp::refreshPlayback() {
     }
     BoolResetGuard refreshGuard(refreshInFlight_);
 
-    debuglog::trace("Playback", "Refreshing playback state.");
     auto playback = client_.getCurrentPlayback();
     if (!playback.has_value()) {
         bool hadCachedPlayback = false;
@@ -837,8 +980,6 @@ void LyricsApp::refreshPlayback() {
             hadCachedPlayback = cachedPlayback_.has_value();
         }
 
-        // Some providers briefly return no active session during handoff/ads.
-        // Keep the previous snapshot for a few misses to avoid UI flicker.
         ++consecutivePlaybackMisses_;
         if (hadCachedPlayback && consecutivePlaybackMisses_ < kTransientPlaybackMissLimit_) {
             debuglog::warn("Playback", QString("Transient playback miss (%1/%2); retaining previous state.")
@@ -852,7 +993,6 @@ void LyricsApp::refreshPlayback() {
             cachedPlayback_ = std::nullopt;
         }
 
-        debuglog::trace("Playback", "No active playback detected.");
         currentTrackId_.clear();
         QMutexLocker locker(&lyricsMutex_);
         currentLyrics_ = std::nullopt;
@@ -860,11 +1000,30 @@ void LyricsApp::refreshPlayback() {
     }
 
     consecutivePlaybackMisses_ = 0;
+    std::optional<PlaybackInfo> prevPlayback;
     {
         QMutexLocker locker(&playbackMutex_);
+        prevPlayback = cachedPlayback_;
         cachedPlayback_ = playback;
     }
     lastPlaybackSnapshotAtMs_ = QDateTime::currentMSecsSinceEpoch();
+
+    if (prevPlayback.has_value() && playback->trackId != prevPlayback->trackId
+        && currentRepeatEnabled_.has_value() && currentRepeatEnabled_.value()) {
+        const auto& prev = prevPlayback.value();
+        const qint64 marginMs = 1500;
+        if (prev.isPlaying && prev.durationMs > 0 && (prev.progressMs + marginMs >= prev.durationMs)) {
+            debuglog::info("Playback", QString("Repeat requested: restarting previous track (prevId=%1)").arg(prev.trackId));
+
+            if (client_.previousTrack()) {
+                client_.seekToPosition(0);
+                return;
+            }
+
+            client_.seekToPosition(0);
+            return;
+        }
+    }
 
     if (playback->trackId.isEmpty() || playback->trackId == currentTrackId_) {
         debuglog::trace("Playback", QString("Skipping lyrics refresh trackId=%1").arg(playback->trackId));
@@ -886,7 +1045,7 @@ void LyricsApp::fetchLyricsAsync(const PlaybackInfo& playback) {
 
         {
             QMutexLocker playbackLocker(&playbackMutex_);
-            // Drop stale async results if the track changed while the request was in flight.
+
             if (!cachedPlayback_.has_value() || cachedPlayback_->trackId != expectedTrackId) {
                 return;
             }
@@ -965,34 +1124,56 @@ void LyricsApp::setupTray() {
 }
 
 void LyricsApp::wireMainWindowActions() {
-    QObject::connect(mainWindow_->searchButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::searchRequested, [this]() {
         showSearchDialog();
     });
-    QObject::connect(mainWindow_->spotifyLibraryButton(), &QPushButton::clicked, [this]() {
-        showSpotifyLibraryDialog();
+    QObject::connect(mainWindow_, &LyricsWindow::spotifyLibraryRequested, [this]() {
+        if (client_.sourceModeToString() == "sonos") {
+            showSonosFavouritesDialog();
+        } else {
+            showSpotifyLibraryDialog();
+        }
     });
-    QObject::connect(mainWindow_->spotifyDevicesButton(), &QPushButton::clicked, [this]() {
-        showSpotifyDevicesDialog();
+    QObject::connect(mainWindow_, &LyricsWindow::spotifyDevicesRequested, [this]() {
+
+        if (client_.sourceModeToString() == "sonos") {
+            showSonosZonesDialog();
+        } else {
+            showSpotifyDevicesDialog();
+        }
     });
-    QObject::connect(mainWindow_->localBrowseButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::localBrowseRequested, [this]() {
         showLocalLibraryDialog();
     });
-    QObject::connect(mainWindow_->queueButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::queueRequested, [this]() {
         showQueueDialog();
     });
-    QObject::connect(mainWindow_->appearanceButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::appearanceRequested, [this]() {
         showAppearanceDialog();
     });
-    QObject::connect(mainWindow_->libraryPathButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::libraryPathRequested, [this]() {
         showLibraryPathDialog();
     });
-    QObject::connect(mainWindow_->debugButton(), &QPushButton::clicked, [this]() {
+    QObject::connect(mainWindow_, &LyricsWindow::debugRequested, [this]() {
         showDebugDialog();
+    });
+    QObject::connect(mainWindow_, &LyricsWindow::volumeChanged, [this](int percent) {
+        if (!client_.setVolumePercent(percent)) {
+            debuglog::warn("Volume", QString("setVolumePercent failed value=%1 source=%2")
+                .arg(percent)
+                .arg(client_.getSourceName()));
+        }
     });
 }
 
 void LyricsApp::showSearchDialog() {
-    const auto queryOpt = showOverlayTextInput(mainWindow_, QString::fromUtf8("\xF0\x9F\x94\x8E Search"), "Search for tracks, artists, or albums:", "Search");
+
+    if (client_.sourceModeToString() == "sonos") {
+        showSonosFavouritesDialog();
+        return;
+    }
+
+    const auto queryOpt = showOverlayTextInput(mainWindow_, "Search", "Search for tracks, artists, or albums:", "Search");
     if (!queryOpt.has_value()) {
         return;
     }
@@ -1057,7 +1238,7 @@ void LyricsApp::showSpotifyLibraryDialog() {
 
     const int sectionIndex = showOverlaySelectionDialog(
         mainWindow_,
-        QString::fromUtf8("\xF0\x9F\x93\x9A Spotify Library"),
+        "Spotify Library",
         "Choose a library section:",
         sections,
         "Open");
@@ -1068,11 +1249,15 @@ void LyricsApp::showSpotifyLibraryDialog() {
     QVector<SpotifyCatalogItem> items;
     QString sectionTitle = sections[sectionIndex];
 
+    const bool browseSupported = (sectionIndex != 3);
+
     auto pick = showOverlayCatalogPicker(
         mainWindow_,
         QString("Spotify Library • %1").arg(sectionTitle),
         "Loading library items...",
-        "Use filter to search, then choose Play now or Add to queue:",
+        browseSupported
+            ? "Select an item and Browse for tracks, Play now, or Add to queue:"
+            : "Use filter to search, then choose Play now or Add to queue:",
         [this, sectionIndex, &items](const std::function<void(const QString&)>& reportProgress) {
             items.clear();
             const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
@@ -1137,12 +1322,84 @@ void LyricsApp::showSpotifyLibraryDialog() {
             return out;
         },
         "Play now",
-        "Add to queue");
+        "Add to queue",
+        browseSupported ? "Browse" : QString());
     if (!pick.has_value() || pick->index < 0 || pick->index >= items.size()) {
         return;
     }
 
     const auto selected = items[pick->index];
+
+    if (pick->action == CatalogActionChoice::Browse) {
+        QVector<SpotifyTrackItem> tracks;
+        const QString type = selected.type.trimmed().toLower();
+
+        auto trackPick = showOverlayCatalogPicker(
+            mainWindow_,
+            QString("Spotify • %1").arg(selected.name),
+            "Loading tracks...",
+            "Select a track to play or queue:",
+            [this, &tracks, &selected, &type](const std::function<void(const QString&)>& reportProgress) {
+                reportProgress("Fetching tracks...");
+                if (type == "playlist") {
+                    tracks = client_.spotify().getPlaylistTracks(selected.id, 100);
+                } else if (type == "album") {
+                    tracks = client_.spotify().getAlbumTracks(selected.id, 50);
+                } else if (type == "artist") {
+                    tracks = client_.spotify().getArtistTopTracks(selected.id, 20);
+                }
+
+                QVector<CatalogDisplayItem> out;
+                out.reserve(tracks.size());
+                for (const auto& t : tracks) {
+                    CatalogDisplayItem d;
+                    d.title    = t.name;
+                    d.subtitle = t.artist;
+                    if (!t.album.isEmpty())
+                        d.subtitle += QString(" • %1").arg(t.album);
+                    d.imageUrl = t.albumArtUrl;
+                    d.badge    = "Track";
+                    out.push_back(d);
+                }
+                return out;
+            },
+            "Play now",
+            "Add to queue");
+
+        if (!trackPick.has_value() || trackPick->index < 0
+            || trackPick->index >= tracks.size()) {
+            return;
+        }
+
+        const auto& chosenTrack = tracks[trackPick->index];
+        if (trackPick->action == CatalogActionChoice::PlayNow) {
+
+            if (type == "playlist" || type == "album") {
+                if (!client_.spotify().startPlaybackContext(selected.uri, chosenTrack.uri)) {
+                    client_.spotify().startPlaybackUri(chosenTrack.uri);
+                }
+            } else {
+                client_.spotify().startPlaybackUri(chosenTrack.uri);
+            }
+        } else {
+            const auto target = showQueueTargetPicker(mainWindow_);
+            if (!target.has_value()) return;
+            bool ok = false;
+            if (target.value() == "spotify")
+                ok = client_.spotify().addToQueue(chosenTrack.uri);
+            else if (target.value() == "sonos")
+                ok = client_.sonos().addToQueueUri(chosenTrack.uri, true);
+            if (!ok) {
+                showOverlayMessage(mainWindow_, "Spotify Library",
+                    QString("Could not add '%1' to the queue.").arg(chosenTrack.name));
+            } else {
+                showOverlayMessage(mainWindow_, "Spotify Library",
+                    QString("Queued '%1'.").arg(chosenTrack.name));
+            }
+        }
+        return;
+    }
+
     if (pick->action == CatalogActionChoice::PlayNow) {
         if (sectionIndex == 3 && selected.type.compare("track", Qt::CaseInsensitive) == 0) {
             if (!client_.spotify().startPlaybackContext("spotify:collection", selected.uri)) {
@@ -1175,7 +1432,7 @@ void LyricsApp::showSpotifyDevicesDialog() {
     QVector<SpotifyDeviceItem> devices;
     const int index = showOverlaySelectionDialogLazy(
         mainWindow_,
-        QString::fromUtf8("\xF0\x9F\x93\xB1 Devices"),
+        "Devices",
         "Loading devices...",
         "Transfer playback to a device:",
         "Transfer",
@@ -1202,6 +1459,161 @@ void LyricsApp::showSpotifyDevicesDialog() {
     client_.spotify().transferPlaybackToDevice(devices[index].id, true);
 }
 
+void LyricsApp::showSonosZonesDialog() {
+    QDialog dialog(mainWindow_);
+    auto* layout = createOverlayPanel(dialog, mainWindow_, "Sonos Zones", 720, 420);
+
+    auto* statusLabel = new QLabel("Discovering Sonos zones...", &dialog);
+    statusLabel->setObjectName("overlayBody");
+    layout->addWidget(statusLabel);
+
+    auto* zoneList = new QListWidget(&dialog);
+    layout->addWidget(zoneList, 1);
+
+    QCoreApplication::processEvents();
+
+    const auto groups = client_.sonos().getZoneGroups();
+
+    struct FlatEntry {
+        QString label;
+        QString ip;
+        bool isGroup = false;
+    };
+    QVector<FlatEntry> flatEntries;
+
+    if (groups.isEmpty()) {
+        statusLabel->setText("No Sonos zones found. Make sure speakers are on the same network.");
+        zoneList->setEnabled(false);
+    } else {
+        const QString currentIp = client_.sonos().targetSpeakerIp();
+        statusLabel->setText(QString("Found %1 zone group(s). Select a speaker to control:").arg(groups.size()));
+
+        for (const auto& grp : groups) {
+
+            QString header;
+            if (grp.members.size() > 1) {
+                QStringList names;
+                for (const auto& m : grp.members) names.push_back(m.name);
+                header = QString("Group: %1").arg(names.join(" + "));
+            } else {
+                header = grp.coordinatorName;
+            }
+
+            for (const auto& member : grp.members) {
+                const bool isCurrent = (member.ip == currentIp);
+                QString label = QString("   %1%2").arg(member.name, isCurrent ? "  (current)" : "");
+                if (member.isCoordinator && grp.members.size() > 1) {
+                    label += "  [coordinator]";
+                }
+                auto* item = new QListWidgetItem(label, zoneList);
+                item->setData(Qt::UserRole, member.ip);
+                if (isCurrent) {
+                    item->setSelected(true);
+                    zoneList->setCurrentItem(item);
+                }
+                flatEntries.push_back({label, member.ip, false});
+            }
+        }
+    }
+
+    auto* actions = new QHBoxLayout();
+    auto* selectBtn = new QPushButton("Select", &dialog);
+    auto* closeBtn = new QPushButton("Close", &dialog);
+    selectBtn->setObjectName("primary");
+    actions->addWidget(selectBtn);
+    actions->addStretch(1);
+    actions->addWidget(closeBtn);
+    layout->addLayout(actions);
+
+    QObject::connect(closeBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
+    QObject::connect(selectBtn, &QPushButton::clicked, &dialog, [this, zoneList, &flatEntries, statusLabel, &dialog]() {
+        const int row = zoneList->currentRow();
+        if (row < 0 || row >= flatEntries.size()) {
+            statusLabel->setText("Select a speaker first.");
+            return;
+        }
+        const QString ip = flatEntries[row].ip;
+        if (!ip.isEmpty()) {
+            client_.sonos().setTargetSpeakerIp(ip);
+            statusLabel->setText(QString("Now controlling: %1 (%2)").arg(flatEntries[row].label.trimmed(), ip));
+        }
+    });
+
+    dialog.exec();
+}
+
+void LyricsApp::showSonosFavouritesDialog() {
+    QDialog dialog(mainWindow_);
+    auto* layout = createOverlayPanel(dialog, mainWindow_, "Sonos Favourites", 720, 480);
+
+    auto* statusLabel = new QLabel("Loading Sonos favourites...", &dialog);
+    statusLabel->setObjectName("overlayBody");
+    layout->addWidget(statusLabel);
+
+    auto* list = new QListWidget(&dialog);
+    layout->addWidget(list, 1);
+
+    QCoreApplication::processEvents();
+
+    const auto favs = client_.sonos().getFavourites();
+
+    if (favs.isEmpty()) {
+        statusLabel->setText("No Sonos favourites found.");
+        list->addItem("No favourites available");
+        list->setEnabled(false);
+    } else {
+        statusLabel->setText(QString("%1 favourite(s). Select one to play or add to queue:").arg(favs.size()));
+        for (int i = 0; i < favs.size(); ++i) {
+            const auto& f = favs[i];
+            QString label = f.title;
+            if (!f.type.isEmpty() && f.type != "other") {
+                label += QString("  (%1)").arg(f.type);
+            }
+            auto* item = new QListWidgetItem(label, list);
+            item->setData(Qt::UserRole, i);
+        }
+    }
+
+    auto* actions = new QHBoxLayout();
+    auto* playBtn = new QPushButton("Play Now", &dialog);
+    auto* queueBtn = new QPushButton("Add to Queue", &dialog);
+    auto* closeBtn = new QPushButton("Close", &dialog);
+    playBtn->setObjectName("primary");
+    actions->addWidget(playBtn);
+    actions->addWidget(queueBtn);
+    actions->addStretch(1);
+    actions->addWidget(closeBtn);
+    layout->addLayout(actions);
+
+    QObject::connect(closeBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
+
+    QObject::connect(playBtn, &QPushButton::clicked, &dialog, [this, list, &favs, statusLabel]() {
+        const int row = list->currentRow();
+        if (row < 0 || row >= favs.size()) {
+            statusLabel->setText("Select a favourite first.");
+            return;
+        }
+        const auto& fav = favs[row];
+        const bool ok = client_.sonos().playUriNow(fav.uri);
+        statusLabel->setText(ok ? QString("Playing '%1'.").arg(fav.title)
+                                : QString("Failed to play '%1'.").arg(fav.title));
+    });
+
+    QObject::connect(queueBtn, &QPushButton::clicked, &dialog, [this, list, &favs, statusLabel]() {
+        const int row = list->currentRow();
+        if (row < 0 || row >= favs.size()) {
+            statusLabel->setText("Select a favourite first.");
+            return;
+        }
+        const auto& fav = favs[row];
+        const bool ok = client_.sonos().addToQueueUri(fav.uri, false);
+        statusLabel->setText(ok ? QString("Added '%1' to Sonos queue.").arg(fav.title)
+                                : QString("Failed to queue '%1'.").arg(fav.title));
+    });
+
+    dialog.exec();
+}
+
 void LyricsApp::showLocalLibraryDialog() {
     auto settings = config::loadSettings();
     QString libraryPath = settings.value("music_library_path").toString();
@@ -1216,7 +1628,7 @@ void LyricsApp::showLocalLibraryDialog() {
 
     const int modeIndex = showOverlaySelectionDialog(
         mainWindow_,
-        QString::fromUtf8("📂 Local Library"),
+        "Local Library",
         "Browse local files by:",
         QStringList{"Albums", "Artists"},
         "Open");
@@ -1295,7 +1707,7 @@ void LyricsApp::showLocalLibraryDialog() {
 
 void LyricsApp::showQueueDialog() {
     QDialog dialog(mainWindow_);
-    auto* layout = createOverlayPanel(dialog, mainWindow_, QString::fromUtf8("\xF0\x9F\x93\x8B Queue"), 720, 480);
+    auto* layout = createOverlayPanel(dialog, mainWindow_, "Queue", 760, 540);
 
     auto* npSection = new QLabel("NOW PLAYING", &dialog);
     npSection->setObjectName("overlaySection");
@@ -1311,80 +1723,165 @@ void LyricsApp::showQueueDialog() {
     npLabel->setTextFormat(Qt::RichText);
     layout->addWidget(npLabel);
 
-    auto settings = config::loadSettings();
-    const QJsonArray favorites = settings.value("favorite_items").toArray();
+    auto* sourceSection = new QLabel("SOURCE", &dialog);
+    sourceSection->setObjectName("overlaySection");
+    layout->addWidget(sourceSection);
 
-    if (!favorites.isEmpty()) {
-        auto* pinnedSection = new QLabel("PINNED", &dialog);
-        pinnedSection->setObjectName("overlaySection");
-        layout->addWidget(pinnedSection);
+    auto* sourceRow = new QHBoxLayout();
+    auto* spotifySourceBtn = new QPushButton("Spotify", &dialog);
+    auto* sonosSourceBtn = new QPushButton("Sonos", &dialog);
+    spotifySourceBtn->setCheckable(true);
+    sonosSourceBtn->setCheckable(true);
+    spotifySourceBtn->setChecked(true);
+    spotifySourceBtn->setObjectName("primary");
+    sourceRow->addWidget(spotifySourceBtn);
+    sourceRow->addWidget(sonosSourceBtn);
+    sourceRow->addStretch(1);
+    layout->addLayout(sourceRow);
 
-        auto* pinnedList = new QListWidget(&dialog);
-        for (const auto& item : favorites) {
-            const QJsonObject obj = item.toObject();
-            const QString name = obj.value("name").toString();
-            if (!name.isEmpty()) {
-                pinnedList->addItem(QString::fromUtf8("\xF0\x9F\x93\x8C") + "  " + name);
-            }
-        }
-        pinnedList->setMaximumHeight(120);
-        layout->addWidget(pinnedList);
-    }
+    QObject::connect(spotifySourceBtn, &QPushButton::clicked, &dialog, [spotifySourceBtn, sonosSourceBtn]() {
+        spotifySourceBtn->setChecked(true);
+        sonosSourceBtn->setChecked(false);
+        spotifySourceBtn->setObjectName("primary");
+        sonosSourceBtn->setObjectName("");
+        spotifySourceBtn->style()->unpolish(spotifySourceBtn);
+        spotifySourceBtn->style()->polish(spotifySourceBtn);
+        sonosSourceBtn->style()->unpolish(sonosSourceBtn);
+        sonosSourceBtn->style()->polish(sonosSourceBtn);
+    });
+    QObject::connect(sonosSourceBtn, &QPushButton::clicked, &dialog, [spotifySourceBtn, sonosSourceBtn]() {
+        sonosSourceBtn->setChecked(true);
+        spotifySourceBtn->setChecked(false);
+        sonosSourceBtn->setObjectName("primary");
+        spotifySourceBtn->setObjectName("");
+        spotifySourceBtn->style()->unpolish(spotifySourceBtn);
+        spotifySourceBtn->style()->polish(spotifySourceBtn);
+        sonosSourceBtn->style()->unpolish(sonosSourceBtn);
+        sonosSourceBtn->style()->polish(sonosSourceBtn);
+    });
 
-    auto* topSection = new QLabel("YOUR TOP TRACKS", &dialog);
-    topSection->setObjectName("overlaySection");
-    layout->addWidget(topSection);
+    auto* queueSection = new QLabel("QUEUE", &dialog);
+    queueSection->setObjectName("overlaySection");
+    layout->addWidget(queueSection);
 
-    auto* list = new QListWidget(&dialog);
-    layout->addWidget(list, 1);
+    auto* queueList = new QListWidget(&dialog);
+    queueList->setDragDropMode(QAbstractItemView::InternalMove);
+    queueList->setDefaultDropAction(Qt::MoveAction);
+    queueList->setSelectionMode(QAbstractItemView::SingleSelection);
+    layout->addWidget(queueList, 1);
 
-    const auto topTracks = client_.spotify().getTopTracks(10);
-    for (int i = 0; i < topTracks.size(); ++i) {
-        list->addItem(QString("%1.  %2 — %3").arg(i + 1).arg(topTracks[i].name, topTracks[i].artist));
-    }
-    if (topTracks.isEmpty()) {
-        list->addItem("No top tracks available");
-        list->setEnabled(false);
-    }
-
-    auto* statusLabel = new QLabel("Select a track and choose Spotify Queue or Sonos Queue.", &dialog);
+    auto* statusLabel = new QLabel("", &dialog);
     statusLabel->setObjectName("overlayBody");
     layout->addWidget(statusLabel);
 
+    struct QueueEntry {
+        QString name;
+        QString artist;
+        QString uri;
+    };
+    auto* entries = new QVector<QueueEntry>();
+
+    auto loadQueue = [this, queueList, statusLabel, spotifySourceBtn, entries]() {
+        queueList->clear();
+        entries->clear();
+
+        if (spotifySourceBtn->isChecked()) {
+            statusLabel->setText("Loading Spotify queue...");
+            QCoreApplication::processEvents();
+            const auto tracks = client_.spotify().getQueue();
+            if (tracks.isEmpty()) {
+                queueList->addItem("Queue is empty");
+                queueList->setEnabled(false);
+                statusLabel->setText("No tracks in Spotify queue.");
+                return;
+            }
+            queueList->setEnabled(true);
+
+            for (int i = 0; i < tracks.size(); ++i) {
+                const auto& t = tracks[i];
+                const QString prefix = (i == 0) ? QString::fromUtf8("\u25B6 ") : QString("%1.  ").arg(i);
+                auto* item = new QListWidgetItem(QString("%1%2 — %3").arg(prefix, t.name, t.artist));
+                item->setData(Qt::UserRole, i);
+                if (i == 0) {
+
+                    item->setFlags(item->flags() & ~Qt::ItemIsDragEnabled);
+                }
+                queueList->addItem(item);
+                entries->push_back({t.name, t.artist, t.uri});
+            }
+            statusLabel->setText(QString("%1 track(s) in Spotify queue.").arg(tracks.size()));
+        } else {
+            statusLabel->setText("Loading Sonos queue...");
+            QCoreApplication::processEvents();
+            const auto items = client_.sonos().getQueue();
+            if (items.isEmpty()) {
+                queueList->addItem("Queue is empty (or Sonos unavailable)");
+                queueList->setEnabled(false);
+                statusLabel->setText("No tracks in Sonos queue.");
+                return;
+            }
+            queueList->setEnabled(true);
+            for (int i = 0; i < items.size(); ++i) {
+                const auto& t = items[i];
+                auto* item = new QListWidgetItem(QString("%1.  %2 — %3").arg(i + 1).arg(t.title, t.artist));
+                item->setData(Qt::UserRole, i);
+                queueList->addItem(item);
+                entries->push_back({t.title, t.artist, t.uri});
+            }
+            statusLabel->setText(QString("%1 track(s) in Sonos queue.").arg(items.size()));
+        }
+    };
+
+    QObject::connect(spotifySourceBtn, &QPushButton::clicked, &dialog, [loadQueue]() { loadQueue(); });
+    QObject::connect(sonosSourceBtn, &QPushButton::clicked, &dialog, [loadQueue]() { loadQueue(); });
+
+    loadQueue();
+
     auto* actions = new QHBoxLayout();
-    auto* addSpotifyButton = new QPushButton("Add to Spotify Queue", &dialog);
-    auto* addSonosButton = new QPushButton("Add to Sonos Queue", &dialog);
+    auto* removeBtn = new QPushButton("Remove", &dialog);
+    auto* refreshBtn = new QPushButton("Refresh", &dialog);
     auto* closeButton = new QPushButton("Close", &dialog);
-    addSpotifyButton->setObjectName("primary");
-    actions->addWidget(addSpotifyButton);
-    actions->addWidget(addSonosButton);
+    removeBtn->setToolTip("Remove the selected track from the queue");
+    actions->addWidget(removeBtn);
+    actions->addWidget(refreshBtn);
     actions->addStretch(1);
     actions->addWidget(closeButton);
 
     QObject::connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::accept);
-    QObject::connect(addSpotifyButton, &QPushButton::clicked, &dialog, [this, list, topTracks, statusLabel]() {
-        const int index = list->currentRow();
-        if (index < 0 || index >= topTracks.size()) {
-            statusLabel->setText("Choose a track first.");
+
+    QObject::connect(refreshBtn, &QPushButton::clicked, &dialog, [loadQueue]() { loadQueue(); });
+
+    QObject::connect(removeBtn, &QPushButton::clicked, &dialog, [this, queueList, statusLabel, spotifySourceBtn, entries, loadQueue]() {
+        const int row = queueList->currentRow();
+        if (row < 0 || row >= entries->size()) {
+            statusLabel->setText("Select a track to remove.");
             return;
         }
-        const bool ok = client_.spotify().addToQueue(topTracks[index].uri);
-        statusLabel->setText(ok ? QString("Added '%1' to Spotify queue.").arg(topTracks[index].name)
-                                : QString("Failed to add '%1' to Spotify queue.").arg(topTracks[index].name));
-    });
-    QObject::connect(addSonosButton, &QPushButton::clicked, &dialog, [this, list, topTracks, statusLabel]() {
-        const int index = list->currentRow();
-        if (index < 0 || index >= topTracks.size()) {
-            statusLabel->setText("Choose a track first.");
+
+        if (spotifySourceBtn->isChecked()) {
+
+            if (row == 0) {
+                statusLabel->setText("Cannot remove the currently playing track.");
+                return;
+            }
+            statusLabel->setText("Spotify API does not support removing individual queue items. Use skip (→) instead.");
             return;
+        } else {
+
+            const bool ok = client_.sonos().removeFromQueue(row);
+            if (ok) {
+                statusLabel->setText(QString("Removed '%1' from Sonos queue.").arg((*entries)[row].name));
+                loadQueue();
+            } else {
+                statusLabel->setText(QString("Failed to remove '%1'.").arg((*entries)[row].name));
+            }
         }
-        const bool ok = client_.sonos().addToQueueUri(topTracks[index].uri, true);
-        statusLabel->setText(ok ? QString("Added '%1' to Sonos queue.").arg(topTracks[index].name)
-                                : QString("Failed to add '%1' to Sonos queue.").arg(topTracks[index].name));
     });
 
     layout->addLayout(actions);
     dialog.exec();
+
+    delete entries;
 }
 
 bool LyricsApp::playSpotifyCatalogItemNow(const SpotifyCatalogItem& item) {
@@ -1449,49 +1946,25 @@ bool LyricsApp::queueSpotifyCatalogItem(const SpotifyCatalogItem& item, const QS
 
 void LyricsApp::showAppearanceDialog() {
     auto settings = config::loadSettings();
+    const auto palette = wintools::themes::ThemeHelper::currentPalette();
 
     QDialog dialog(mainWindow_);
-    auto* panel = createOverlayPanel(dialog, mainWindow_, QString::fromUtf8("\xF0\x9F\x8E\xA8 Appearance"), 640, 640);
+    auto* panel = createOverlayPanel(dialog, mainWindow_, "Mini Player Style", 640, 640);
     dialog.setStyleSheet(dialog.styleSheet() +
         "QFrame#overlayPanel { border-radius: 24px; }"
-        "QLabel#overlayTitle { letter-spacing: 0.4px; }"
-        "QLabel#overlaySection { background-color: rgba(255,255,255,0.08); border-radius: 999px; padding: 7px 12px; }");
-
-    auto* displaySection = new QLabel("DISPLAY", &dialog);
-    displaySection->setObjectName("overlaySection");
-    panel->addWidget(displaySection);
-
-    auto* displayCard = new QFrame(&dialog);
-    displayCard->setStyleSheet(QString("QFrame { background-color: %1; border-radius: 10px; padding: 4px; }").arg(config::CARD_COLOR));
-    auto* displayLayout = new QVBoxLayout(displayCard);
-    displayLayout->setContentsMargins(14, 10, 14, 10);
-    displayLayout->setSpacing(10);
-
-    auto* largeText = new QCheckBox("Large text", displayCard);
-    largeText->setChecked(settings.value("large_text").toBool(false));
-    displayLayout->addWidget(largeText);
-
-    auto* highContrast = new QCheckBox("High contrast", displayCard);
-    highContrast->setChecked(settings.value("high_contrast").toBool(false));
-    displayLayout->addWidget(highContrast);
-
-    auto* reducedMotion = new QCheckBox("Reduced motion", displayCard);
-    reducedMotion->setChecked(settings.value("reduced_motion").toBool(false));
-    displayLayout->addWidget(reducedMotion);
-
-    panel->addWidget(displayCard);
+        "QLabel#overlayTitle { letter-spacing: 0.4px; }");
 
     auto* miniSection = new QLabel("MINI PLAYER", &dialog);
     miniSection->setObjectName("overlaySection");
     panel->addWidget(miniSection);
 
     auto* miniCard = new QFrame(&dialog);
-    miniCard->setStyleSheet(QString("QFrame { background-color: %1; border-radius: 10px; padding: 4px; }").arg(config::CARD_COLOR));
+    miniCard->setStyleSheet(QString("QFrame { background-color: %1; border-radius: 10px; padding: 4px; }").arg(palette.cardBackground.name()));
     auto* miniLayout = new QVBoxLayout(miniCard);
     miniLayout->setContentsMargins(14, 10, 14, 10);
     miniLayout->setSpacing(8);
 
-    auto* miniHint = new QLabel("Use hex colors like #111111. Turn on transparency for a glass-like mini player.", miniCard);
+    auto* miniHint = new QLabel("Use hex colors or leave values as theme defaults. Turn on transparency for a glass-like mini player.", miniCard);
     miniHint->setObjectName("overlayBody");
     miniHint->setWordWrap(true);
     miniLayout->addWidget(miniHint);
@@ -1502,10 +1975,10 @@ void LyricsApp::showAppearanceDialog() {
 
     auto* miniBgRow = new QHBoxLayout();
     auto* miniBgLabel = new QLabel("Background color", miniCard);
-    miniBgLabel->setStyleSheet(QString("color: %1; font-size: 10pt;").arg(config::TEXT_COLOR));
+    miniBgLabel->setStyleSheet(QString("color: %1; font-size: 10pt;").arg(palette.foreground.name()));
     auto* miniBgColor = new QLineEdit(miniCard);
-    miniBgColor->setPlaceholderText("#111111");
-    miniBgColor->setText(settings.value("mini_player_bg_color").toString("#111111"));
+    miniBgColor->setPlaceholderText(palette.cardBackground.name());
+    miniBgColor->setText(settings.value("mini_player_bg_color").toString(palette.cardBackground.name()));
     miniBgRow->addWidget(miniBgLabel);
     miniBgRow->addStretch(1);
     miniBgRow->addWidget(miniBgColor);
@@ -1513,10 +1986,10 @@ void LyricsApp::showAppearanceDialog() {
 
     auto* miniControlRow = new QHBoxLayout();
     auto* miniControlLabel = new QLabel("Controls color", miniCard);
-    miniControlLabel->setStyleSheet(QString("color: %1; font-size: 10pt;").arg(config::TEXT_COLOR));
+    miniControlLabel->setStyleSheet(QString("color: %1; font-size: 10pt;").arg(palette.foreground.name()));
     auto* miniControlColor = new QLineEdit(miniCard);
-    miniControlColor->setPlaceholderText("#000000");
-    miniControlColor->setText(settings.value("mini_player_control_color").toString("#000000"));
+    miniControlColor->setPlaceholderText(palette.windowBackground.name());
+    miniControlColor->setText(settings.value("mini_player_control_color").toString(palette.windowBackground.name()));
     miniControlRow->addWidget(miniControlLabel);
     miniControlRow->addStretch(1);
     miniControlRow->addWidget(miniControlColor);
@@ -1524,10 +1997,10 @@ void LyricsApp::showAppearanceDialog() {
 
     auto* miniTextRow = new QHBoxLayout();
     auto* miniTextLabel = new QLabel("Text color", miniCard);
-    miniTextLabel->setStyleSheet(QString("color: %1; font-size: 10pt;").arg(config::TEXT_COLOR));
+    miniTextLabel->setStyleSheet(QString("color: %1; font-size: 10pt;").arg(palette.foreground.name()));
     auto* miniTextColor = new QLineEdit(miniCard);
-    miniTextColor->setPlaceholderText("#FFFFFF");
-    miniTextColor->setText(settings.value("mini_player_text_color").toString("#FFFFFF"));
+    miniTextColor->setPlaceholderText(palette.foreground.name());
+    miniTextColor->setText(settings.value("mini_player_text_color").toString(palette.foreground.name()));
     miniTextRow->addWidget(miniTextLabel);
     miniTextRow->addStretch(1);
     miniTextRow->addWidget(miniTextColor);
@@ -1536,7 +2009,7 @@ void LyricsApp::showAppearanceDialog() {
     auto* opacityRow = new QHBoxLayout();
 
     auto* opacityLabel = new QLabel("Opacity", miniCard);
-    opacityLabel->setStyleSheet(QString("color: %1; font-size: 10pt;").arg(config::TEXT_COLOR));
+    opacityLabel->setStyleSheet(QString("color: %1; font-size: 10pt;").arg(palette.foreground.name()));
     auto* miniOpacity = new QDoubleSpinBox(miniCard);
     miniOpacity->setRange(0.3, 1.0);
     miniOpacity->setSingleStep(0.05);
@@ -1612,7 +2085,7 @@ void LyricsApp::showAppearanceDialog() {
 
     panel->addWidget(previewFrame);
 
-    const auto updateColorInputState = [](QLineEdit* input, bool valid) {
+    const auto updateColorInputState = [&palette](QLineEdit* input, bool valid) {
         if (!input) {
             return;
         }
@@ -1620,7 +2093,7 @@ void LyricsApp::showAppearanceDialog() {
             input->setStyleSheet(QString());
             return;
         }
-        input->setStyleSheet("QLineEdit { border: 1px solid #D06060; border-radius: 10px; }");
+        input->setStyleSheet(QString("QLineEdit { border: 1px solid %1; border-radius: 10px; }").arg(palette.dangerRed.name()));
     };
 
     const auto updateMiniPreview = [&]() {
@@ -1628,24 +2101,31 @@ void LyricsApp::showAppearanceDialog() {
         const QString controlText = miniControlColor->text().trimmed();
         const QString textText = miniTextColor->text().trimmed();
 
-        const bool bgValid = QColor::isValidColor(bgText);
-        const bool controlValid = QColor::isValidColor(controlText);
-        const bool textValid = QColor::isValidColor(textText);
+        const QColor parsedBgColor(bgText);
+        const QColor parsedControlColor(controlText);
+        const QColor parsedTextColor(textText);
+
+        const bool bgValid = parsedBgColor.isValid();
+        const bool controlValid = parsedControlColor.isValid();
+        const bool textValid = parsedTextColor.isValid();
 
         updateColorInputState(miniBgColor, bgValid);
         updateColorInputState(miniControlColor, controlValid);
         updateColorInputState(miniTextColor, textValid);
 
-        const QColor bgColor = bgValid ? QColor(bgText) : QColor("#111111");
-        const QColor controlColor = controlValid ? QColor(controlText) : QColor("#000000");
-        const QColor textColor = textValid ? QColor(textText) : QColor("#FFFFFF");
+        const QColor bgColor = bgValid ? parsedBgColor : palette.cardBackground;
+        const QColor controlColor = controlValid ? parsedControlColor : palette.windowBackground;
+        const QColor textColor = textValid ? parsedTextColor : palette.foreground;
         const bool transparent = transparentMini->isChecked();
 
         const double opacityValue = std::clamp(miniOpacity->value(), 0.0, 1.0);
         QColor barColor = transparent ? QColor(0, 0, 0, 0) : bgColor;
         barColor.setAlphaF(std::clamp(opacityValue, 0.0, 1.0));
 
-        QColor controlBg = transparent ? QColor(255, 255, 255, 24) : controlColor;
+        QColor controlBg = transparent ? palette.hoverBackground : controlColor;
+        if (transparent) {
+            controlBg.setAlpha(70);
+        }
         controlBg.setAlphaF(std::clamp(opacityValue, 0.0, 1.0));
 
         const QString style = QString(
@@ -1653,8 +2133,8 @@ void LyricsApp::showAppearanceDialog() {
             "QFrame#miniPreviewBar { background-color: %3; border-radius: 14px; border: 1px solid %2; }"
             "QLabel#miniPreviewText { color: %4; font-size: 9pt; }"
             "QLabel#miniPreviewControl { color: %4; background-color: %5; border-radius: 8px; padding: 2px 6px; }")
-            .arg(config::CARD_COLOR,
-                 config::BORDER_COLOR,
+              .arg(palette.cardBackground.name(),
+                  palette.cardBorder.name(),
                  barColor.name(QColor::HexArgb),
                  textColor.name(),
                  controlBg.name(QColor::HexArgb));
@@ -1701,15 +2181,14 @@ void LyricsApp::showAppearanceDialog() {
         return;
     }
 
-    settings.insert("large_text", largeText->isChecked());
-    settings.insert("high_contrast", highContrast->isChecked());
-    settings.insert("reduced_motion", reducedMotion->isChecked());
-
     const QString bgColor = miniBgColor->text().trimmed();
     const QString controlColor = miniControlColor->text().trimmed();
     const QString textColor = miniTextColor->text().trimmed();
-    if (!QColor::isValidColor(bgColor) || !QColor::isValidColor(controlColor) || !QColor::isValidColor(textColor)) {
-        showOverlayMessage(mainWindow_, "Appearance", "Please enter valid color values like #111111, #000000, and #FFFFFF.");
+    const QColor parsedBgColor(bgColor);
+    const QColor parsedControlColor(controlColor);
+    const QColor parsedTextColor(textColor);
+    if (!parsedBgColor.isValid() || !parsedControlColor.isValid() || !parsedTextColor.isValid()) {
+        showOverlayMessage(mainWindow_, "Appearance", "Please enter valid color values (example: #2d2d2d).\nTip: use the theme-colored defaults shown in the placeholders.");
         return;
     }
 
@@ -1735,7 +2214,7 @@ void LyricsApp::showLibraryPathDialog() {
     }
 
     const auto pathOpt = showOverlayTextInput(mainWindow_,
-        QString::fromUtf8("\xF0\x9F\x93\x81 Library Path"),
+        "Library Path",
         "Enter the folder path where your music files are stored:",
         "Save",
         currentPath);
@@ -1760,7 +2239,7 @@ void LyricsApp::showLibraryPathDialog() {
 
 void LyricsApp::showDebugDialog() {
     QDialog dialog(mainWindow_);
-    auto* layout = createOverlayPanel(dialog, mainWindow_, QString::fromUtf8("\xF0\x9F\x94\xA7 Debug"), 780, 540);
+    auto* layout = createOverlayPanel(dialog, mainWindow_, "Debug", 780, 540);
     auto settings = config::loadSettings();
     QTextEdit* settingsDump = nullptr;
 
@@ -1789,8 +2268,8 @@ void LyricsApp::showDebugDialog() {
     addStatusRow("Source Mode", client_.sourceModeToString());
     addStatusRow("Active Source", latestSourceName_.isEmpty() ? "Unknown" : latestSourceName_);
     addStatusRow("Mini Mode", miniMode_ ? "Active" : "Inactive");
-    addStatusRow("Spotify", client_.spotify().isAvailable() ? QString::fromUtf8("\xE2\x9C\x85 Connected") : QString::fromUtf8("\xE2\x9D\x8C Disconnected"));
-    addStatusRow("Sonos", client_.sonos().isAvailable() ? QString::fromUtf8("\xE2\x9C\x85 Connected") : QString::fromUtf8("\xE2\x9D\x8C Disconnected"));
+    addStatusRow("Spotify", client_.spotify().isAvailable() ? QString("Connected") : QString("Disconnected"));
+    addStatusRow("Sonos", client_.sonos().isAvailable() ? QString("Connected") : QString("Disconnected"));
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const qint64 snapshotAgeMs = lastPlaybackSnapshotAtMs_ > 0 ? std::max<qint64>(0, now - lastPlaybackSnapshotAtMs_) : -1;
     addStatusRow("Playback Snapshot Age", snapshotAgeMs >= 0 ? QString("%1 ms").arg(snapshotAgeMs) : QString("N/A"));
@@ -1879,16 +2358,15 @@ void LyricsApp::showMiniSourceMenu() {
     }
 
     QMenu menu(miniPlayerWindow_);
-    auto* autoAction = menu.addAction("Auto Detect");
+    menu.setStyleSheet(buildMiniPopupMenuQss(wintools::themes::ThemeHelper::currentPalette()));
+
     auto* spotifyAction = menu.addAction("Spotify");
     auto* sonosAction = menu.addAction("Sonos");
 
-    autoAction->setCheckable(true);
     spotifyAction->setCheckable(true);
     sonosAction->setCheckable(true);
 
     const QString mode = client_.sourceModeToString();
-    autoAction->setChecked(mode == "auto");
     spotifyAction->setChecked(mode == "spotify");
     sonosAction->setChecked(mode == "sonos");
 
@@ -1900,9 +2378,7 @@ void LyricsApp::showMiniSourceMenu() {
     }
 
     QString nextMode = mode;
-    if (selected == autoAction) {
-        nextMode = "auto";
-    } else if (selected == spotifyAction) {
+    if (selected == spotifyAction) {
         nextMode = "spotify";
     } else if (selected == sonosAction) {
         nextMode = "sonos";
@@ -1944,6 +2420,7 @@ void LyricsApp::showMiniPinnedMenu() {
     }
 
     QMenu menu(miniPlayerWindow_);
+    menu.setStyleSheet(buildMiniPopupMenuQss(wintools::themes::ThemeHelper::currentPalette()));
     auto* pinCurrent = menu.addAction("+ Track");
     auto* pinContext = menu.addAction("+ Context");
     auto* addLink = menu.addAction("+ Link...");
@@ -2082,17 +2559,21 @@ void LyricsApp::showMiniTopItemsMenu() {
     }
 
     QMenu menu(miniPlayerWindow_);
-    menu.setStyleSheet(QString(
-        "QMenu { background-color: rgba(20,20,20,240); color: %1; border: 1px solid %2; border-radius: 12px; padding: 6px; }"
-        "QMenu::item { background-color: transparent; padding: 8px 14px; border-radius: 8px; }"
-        "QMenu::item:selected { background-color: rgba(40,40,40,245); color: %3; }"
-        "QMenu::icon { padding-left: 4px; }")
-        .arg(config::TEXT_COLOR, config::BORDER_COLOR, config::HIGHLIGHT_COLOR));
+    menu.setStyleSheet(buildMiniPopupMenuQss(wintools::themes::ThemeHelper::currentPalette()));
 
     QIcon placeholder;
     {
+        const auto palette = wintools::themes::ThemeHelper::currentPalette();
         QPixmap placeholderPix(26, 26);
-        placeholderPix.fill(QColor(18, 18, 18, 230));
+        placeholderPix.fill(Qt::transparent);
+        QPainter p(&placeholderPix);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        QFont font = p.font();
+        font.setPointSize(11);
+        font.setBold(true);
+        p.setFont(font);
+        p.setPen(palette.mutedForeground);
+        p.drawText(placeholderPix.rect(), Qt::AlignCenter, QString::fromUtf8("♪"));
         placeholder = QIcon(placeholderPix);
     }
 
@@ -2202,7 +2683,7 @@ void LyricsApp::updateUi() {
 
         qint64 displayProgressMs = std::max<qint64>(0, playback->progressMs);
         if (playback->isPlaying && playback->durationMs > 0 && lastPlaybackSnapshotAtMs_ > 0) {
-            // Render smooth progress between polls by extrapolating from the last trusted snapshot.
+
             const qint64 elapsedMs = std::max<qint64>(0, nowMs - lastPlaybackSnapshotAtMs_);
             displayProgressMs = std::min<qint64>(playback->durationMs, displayProgressMs + elapsedMs);
         }
@@ -2229,6 +2710,9 @@ void LyricsApp::updateUi() {
         mainWindow_->setFavoriteState(currentTrackLiked_, playback->source == "spotify");
         updateMiniPlayer(playback.value(), sourceName);
 
+        const bool volumeSupported = (sourceId == "spotify" || sourceId == "sonos");
+        mainWindow_->setVolumeControlState(playback->volumePercent, volumeSupported);
+
         const bool shuffleSupported = (sourceId == "spotify");
         if (!shuffleSupported) {
             currentShuffleSource_.clear();
@@ -2240,6 +2724,18 @@ void LyricsApp::updateUi() {
                 currentShuffleSource_ = sourceId;
             }
             mainWindow_->setShuffleState(currentShuffleEnabled_.value_or(false), true);
+        }
+
+        const bool repeatSupported = (sourceId == "spotify");
+        if (!repeatSupported) {
+            currentRepeatEnabled_ = std::nullopt;
+            mainWindow_->setRepeatState(false, false);
+        } else {
+
+            if (!currentRepeatEnabled_.has_value()) {
+                currentRepeatEnabled_ = false;
+            }
+            mainWindow_->setRepeatState(currentRepeatEnabled_.value_or(false), true);
         }
 
         std::optional<LyricsList> lyrics;
@@ -2263,6 +2759,7 @@ void LyricsApp::updateUi() {
         latestSourceName_.clear();
         mainWindow_->setFavoriteState(std::nullopt, false);
         mainWindow_->setShuffleState(false, false);
+        mainWindow_->setVolumeControlState(-1, false);
         mainWindow_->showWaiting();
         if (miniPlayerWindow_) {
             miniPlayerWindow_->setTrackText("No track", "Waiting for playback...");

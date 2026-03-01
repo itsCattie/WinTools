@@ -1,7 +1,5 @@
 #pragma once
 
-// WinTools: icon helper manages shared infrastructure.
-
 namespace wintools::themes {
 
 class IconHelper {

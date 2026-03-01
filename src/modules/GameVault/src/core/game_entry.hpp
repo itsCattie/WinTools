@@ -1,7 +1,5 @@
 #pragma once
 
-// GameVault: game entry manages core logic and state.
-
 #include <QString>
 #include <QStringList>
 #include <QMetaType>
@@ -37,7 +35,7 @@ inline QString platformName(GamePlatform p) {
         case GamePlatform::Dolphin:    return "Dolphin";
         case GamePlatform::PCSX2:      return "PCSX2";
         case GamePlatform::DeSmuME:    return "DeSmuME";
-        default:                       return "Unknown";
+        default:                       return "Other";
     }
 }
 

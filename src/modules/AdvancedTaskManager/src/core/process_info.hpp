@@ -1,7 +1,5 @@
 #pragma once
 
-// AdvancedTaskManager: process info manages core logic and state.
-
 #include <QString>
 #include <QVector>
 #include <cstdint>
@@ -34,6 +32,7 @@ struct ProcessInfo {
     int             priority = 8;
 
     double   cpuPercent = 0.0;
+    double   gpuPercent = 0.0;
 
     quint64  workingSetBytes  = 0;
     quint64  privateBytes     = 0;
@@ -50,6 +49,9 @@ struct ProcessInfo {
 
     quint64  rawReadBytes  = 0;
     quint64  rawWriteBytes = 0;
+
+    int      tcpConnections  = 0;
+    int      udpEndpoints    = 0;
 
     QVector<quint32> childPids;
 };
@@ -70,6 +72,7 @@ struct NetPerf {
 
 struct SystemPerf {
     double  cpuUsagePercent    = 0.0;
+    double  gpuUsagePercent    = 0.0;
     double  cpuFreqMHz         = 0.0;
     quint64 totalMemoryBytes   = 0;
     quint64 availMemoryBytes   = 0;

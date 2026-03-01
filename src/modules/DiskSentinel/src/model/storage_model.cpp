@@ -2,11 +2,11 @@
 
 #include "logger/logger.hpp"
 
+#include <QApplication>
 #include <QIcon>
+#include <QStyle>
 #include <algorithm>
 #include <vector>
-
-// DiskSentinel: storage model manages model/view data shaping.
 
 namespace wintools::disksentinel {
 
@@ -16,6 +16,25 @@ StorageModel::StorageModel(QObject* parent)
     : QAbstractItemModel(parent) {
     wintools::logger::Logger::log(kLog, wintools::logger::Severity::Pass,
                                    "StorageModel created.");
+}
+
+void StorageModel::ensureIconsInitialized() const {
+    if (m_iconsInitialized) return;
+
+    if (qApp && qApp->style()) {
+        m_dirIcon  = qApp->style()->standardIcon(QStyle::SP_DirIcon);
+        m_fileIcon = qApp->style()->standardIcon(QStyle::SP_FileIcon);
+    }
+    if (m_dirIcon.isNull()) {
+        m_dirIcon = QIcon::fromTheme(QStringLiteral("folder"),
+                                     QIcon(QStringLiteral(":/icons/folder")));
+    }
+    if (m_fileIcon.isNull()) {
+        m_fileIcon = QIcon::fromTheme(QStringLiteral("text-x-generic"),
+                                      QIcon(QStringLiteral(":/icons/file")));
+    }
+
+    m_iconsInitialized = true;
 }
 
 void StorageModel::setRoot(std::shared_ptr<DiskNode> root) {
@@ -32,7 +51,6 @@ void StorageModel::setRoot(std::shared_ptr<DiskNode> root) {
     beginResetModel();
     m_root = std::move(root);
     invalidateDisplayCache();
-    if (m_root) sortNode(m_root.get(), m_sortColumn, m_sortOrder);
     endResetModel();
 }
 
@@ -124,11 +142,8 @@ QVariant StorageModel::data(const QModelIndex& index, int role) const {
     }
 
     if (role == Qt::DecorationRole && index.column() == ColName) {
-        return node->isDir
-            ? QIcon::fromTheme(QStringLiteral("folder"),
-                               QIcon(QStringLiteral(":/icons/folder")))
-            : QIcon::fromTheme(QStringLiteral("text-x-generic"),
-                               QIcon(QStringLiteral(":/icons/file")));
+        ensureIconsInitialized();
+        return node->isDir ? m_dirIcon : m_fileIcon;
     }
 
     if (role == Qt::TextAlignmentRole) {

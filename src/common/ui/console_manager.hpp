@@ -1,7 +1,5 @@
 #pragma once
 
-// WinTools: console manager manages UI behavior and presentation.
-
 namespace wintools::ui {
 
 class ConsoleManager {

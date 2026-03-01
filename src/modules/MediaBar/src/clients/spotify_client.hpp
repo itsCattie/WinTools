@@ -1,7 +1,5 @@
 #pragma once
 
-// MediaBar: spotify client manages service client integration.
-
 #include "types.hpp"
 
 #include <QUrlQuery>
@@ -50,12 +48,17 @@ public:
     bool playPause();
     bool pausePlayback();
     bool seekToPosition(qint64 positionMs);
+    std::optional<int> getVolumePercent();
+    bool setVolumePercent(int percent);
     std::optional<bool> getShuffleState();
     bool setShuffleState(bool enabled);
+
+    bool setRepeatState(bool enabled);
     std::optional<bool> isTrackSaved(const QString& trackId);
     bool saveTrack(const QString& trackId);
     bool removeTrack(const QString& trackId);
     bool addToQueue(const QString& uri);
+    QVector<SpotifyTrackItem> getQueue();
     QVector<SpotifyTrackItem> searchTracks(const QString& query, int limit = 20);
     QVector<SpotifyCatalogItem> searchCatalog(const QString& query, int limit = 30);
     QVector<SpotifyTrackItem> getSavedTracks(

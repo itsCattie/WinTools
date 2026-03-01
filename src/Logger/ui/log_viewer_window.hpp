@@ -1,7 +1,5 @@
 #pragma once
 
-// WinTools: log viewer window manages UI behavior and presentation.
-
 #include "logger/logger.hpp"
 #include "logger/log_sink.hpp"
 
@@ -19,6 +17,7 @@ class QListWidget;
 class QPushButton;
 class QSplitter;
 class QTableView;
+namespace wintools::themes { class ThemeListener; }
 
 namespace wintools::logviewer {
 
@@ -106,6 +105,7 @@ private:
     QLabel*             m_lblPasses      = nullptr;
 
     bool                m_autoScroll{true};
+    wintools::themes::ThemeListener* m_themeListener = nullptr;
 };
 
 }

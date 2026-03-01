@@ -1,7 +1,5 @@
 #pragma once
 
-// WinTools: hotkey bind dialog manages UI behavior and presentation.
-
 #include "common/hotkey/hotkey_engine.hpp"
 #include "common/themes/window_colour.hpp"
 

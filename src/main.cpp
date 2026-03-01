@@ -1,26 +1,21 @@
 #include "common/ui/launch_page.hpp"
 #include "logger/logger.hpp"
+#include "wintools_version.hpp"
 
 #include <QApplication>
 #include <QLocalServer>
 #include <QLocalSocket>
 
-// WinTools: main manages feature behavior.
-
 namespace {
-constexpr auto kSingleInstanceServerName = "WinToolsNative.SingleInstance";
+constexpr auto kSingleInstanceServerName = "WinTools.SingleInstance";
 constexpr auto kShowCommand = "show";
-#ifdef WINTOOLS_APP_VERSION
-constexpr auto kAppVersion = WINTOOLS_APP_VERSION;
-#else
-constexpr auto kAppVersion = "0.0.0";
-#endif
+constexpr auto kAppVersion = WINTOOLS_APP_VERSION_LITERAL;
 }
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName("WinTools");
-    QCoreApplication::setApplicationName("WinToolsNative");
+    QCoreApplication::setApplicationName("WinTools");
     QCoreApplication::setApplicationVersion(QString::fromUtf8(kAppVersion));
 
     QLocalSocket existingInstanceSocket;

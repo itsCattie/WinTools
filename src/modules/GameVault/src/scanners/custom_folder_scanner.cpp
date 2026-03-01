@@ -6,8 +6,6 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 
-// GameVault: custom folder scanner manages discovery and scanning flow.
-
 namespace wintools::gamevault {
 
 namespace {

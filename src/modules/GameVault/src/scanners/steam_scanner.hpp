@@ -1,5 +1,4 @@
 #pragma once
-// GameVault: steam scanner manages discovery and scanning flow.
 
 #include "i_game_scanner.hpp"
 

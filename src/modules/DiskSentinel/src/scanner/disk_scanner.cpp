@@ -3,18 +3,76 @@
 #include "logger/logger.hpp"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QPointer>
 #include <QThread>
+#include <QThreadPool>
+#include <QMutex>
+#include <QFuture>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include <vector>
-
-// DiskSentinel: disk scanner manages discovery and scanning flow.
+#include <algorithm>
 
 namespace wintools::disksentinel {
 
 static constexpr const char* kLog = "DiskSentinel/Scanner";
+
+static void sortTreeForDisplay(DiskNode* root) {
+    if (!root) return;
+
+    auto cmp = [](const std::shared_ptr<DiskNode>& a,
+                  const std::shared_ptr<DiskNode>& b) -> bool {
+        if (!a || !b) return !a && b;
+        if (a->isDir != b->isDir) return a->isDir;
+        if (a->size != b->size) return a->size > b->size;
+        return a->name.toLower() < b->name.toLower();
+    };
+
+    std::vector<DiskNode*> stack;
+    stack.push_back(root);
+    while (!stack.empty()) {
+        DiskNode* current = stack.back();
+        stack.pop_back();
+        if (!current || current->children.empty()) continue;
+
+        std::sort(current->children.begin(), current->children.end(), cmp);
+        for (const auto& child : current->children) {
+            if (child && child->isDir) {
+                stack.push_back(child.get());
+            }
+        }
+    }
+}
+
+static void accumulateSizes(DiskNode* root) {
+    if (!root) return;
+    std::vector<DiskNode*> allNodes;
+    allNodes.reserve(4096);
+
+    std::vector<DiskNode*> stack;
+    stack.push_back(root);
+    while (!stack.empty()) {
+        DiskNode* n = stack.back();
+        stack.pop_back();
+        allNodes.push_back(n);
+        for (const auto& child : n->children) {
+            if (child && child->isDir)
+                stack.push_back(child.get());
+        }
+    }
+
+    for (int i = static_cast<int>(allNodes.size()) - 1; i >= 0; --i) {
+        DiskNode* n = allNodes[i];
+        if (!n->isDir) continue;
+        qint64 total = 0;
+        for (const auto& child : n->children)
+            total += child->size;
+        n->size = total;
+    }
+}
 
 DiskScanner::DiskScanner(QObject* parent)
     : QObject(parent)
@@ -122,7 +180,7 @@ void DiskScanner::startScan(const QString& rootPath)
 
     });
 
-    t->start();
+    t->start(QThread::LowestPriority);
 }
 
 void DiskScanner::threadMain(std::shared_ptr<ScanState> state,
@@ -141,7 +199,93 @@ void DiskScanner::threadMain(std::shared_ptr<ScanState> state,
     root->path  = rootPath;
     root->isDir = true;
 
-    scanDir(root.get(), state, scanner);
+    QDir dir(rootPath);
+    if (!dir.exists() || !dir.isReadable()) {
+        root->scanError = true;
+        if (scanner) emit scanner->scanFinished(root);
+        return;
+    }
+
+    QVector<DiskNode*> topDirs;
+
+    QDirIterator it(rootPath,
+        QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
+        QDirIterator::NoIteratorFlags);
+
+    while (it.hasNext() && !state->cancel.load()) {
+        it.next();
+        const QFileInfo info = it.fileInfo();
+
+        auto child    = std::make_shared<DiskNode>();
+        child->name   = info.fileName();
+        child->path   = info.absoluteFilePath();
+        child->parent = root.get();
+
+        if (info.isSymLink()) {
+            child->isDir = info.isDir();
+            child->size  = info.isDir() ? 0 : info.size();
+            if (!child->isDir) {
+                state->files++;
+                state->bytes += child->size;
+            }
+        } else if (info.isDir()) {
+            child->isDir = true;
+            child->size  = 0;
+            topDirs.push_back(child.get());
+        } else {
+            child->isDir  = false;
+            child->size   = info.size();
+            state->files++;
+            state->bytes += child->size;
+        }
+
+        root->children.push_back(std::move(child));
+    }
+    root->itemCount = root->children.size();
+    ++state->dirs;
+
+    if (state->cancel.load()) {
+        if (scanner) emit scanner->scanCancelled();
+        return;
+    }
+
+    if (!topDirs.isEmpty()) {
+        const int threadCount = qBound(2, QThread::idealThreadCount(), 8);
+        QThreadPool pool;
+        pool.setMaxThreadCount(threadCount);
+
+        wintools::logger::Logger::log(kLog, wintools::logger::Severity::Pass,
+            QStringLiteral("[thread] Parallel scan: %1 top-level dirs, %2 workers.")
+                .arg(topDirs.size()).arg(threadCount));
+
+        QMutex progressMutex;
+        QElapsedTimer progressTimer;
+        progressTimer.start();
+        qint64 lastProgressMs = 0;
+
+        auto scanSubtree = [&state, &scanner, &progressMutex, &progressTimer, &lastProgressMs](DiskNode* subRoot) {
+            if (state->cancel.load()) return;
+            scanDir(subRoot, state, scanner);
+
+            QMutexLocker lk(&progressMutex);
+            const qint64 nowMs = progressTimer.elapsed();
+            if ((nowMs - lastProgressMs) >= 200) {
+                lastProgressMs = nowMs;
+                if (scanner)
+                    emit scanner->progressUpdate(
+                        state->files.load(), state->bytes.load(), subRoot->path);
+            }
+        };
+
+        QVector<QFuture<void>> futures;
+        futures.reserve(topDirs.size());
+        for (DiskNode* subDir : topDirs) {
+            futures.push_back(QtConcurrent::run(&pool, scanSubtree, subDir));
+        }
+
+        for (auto& f : futures)
+            f.waitForFinished();
+    }
 
     if (state->cancel.load()) {
         wintools::logger::Logger::log(kLog, wintools::logger::Severity::Warning,
@@ -151,10 +295,12 @@ void DiskScanner::threadMain(std::shared_ptr<ScanState> state,
                 .arg(timer.elapsed())
                 .arg(state->files.load())
                 .arg(state->dirs.load()));
-
         if (scanner) emit scanner->scanCancelled();
         return;
     }
+
+    accumulateSizes(root.get());
+    sortTreeForDisplay(root.get());
 
     const qint64 elapsed = timer.elapsed();
     ScanStats stats;
@@ -197,6 +343,9 @@ void DiskScanner::scanDir(DiskNode*                   scanRoot,
     int accessErrors = 0;
     int localFiles   = 0;
     qint64 localBytes = 0;
+    QElapsedTimer progressTimer;
+    progressTimer.start();
+    qint64 lastProgressMs = 0;
 
     while (!stack.empty() && !state->cancel.load()) {
         DiskNode* current = stack.back().node;
@@ -206,27 +355,24 @@ void DiskScanner::scanDir(DiskNode*                   scanRoot,
         if (current->isDir) ++state->dirs;
 
         QDir dir(current->path);
-        dir.setFilter(QDir::AllEntries | QDir::NoDotAndDotDot |
-                      QDir::Hidden    | QDir::System);
-
-        const QFileInfoList entries = dir.entryInfoList();
-
-        if (entries.isEmpty() && current != scanRoot) {
-            const QDir test(current->path);
-            if (!test.isReadable()) {
-                current->scanError = true;
-                ++accessErrors;
-                wintools::logger::Logger::log(kLog, wintools::logger::Severity::Warning,
-                    QStringLiteral("[thread] Cannot read directory: '%1'")
-                        .arg(current->path));
-            }
+        if (!dir.exists() || !dir.isReadable()) {
+            current->scanError = true;
+            ++accessErrors;
+            continue;
         }
 
-        current->itemCount = static_cast<int>(entries.size());
-        current->children.reserve(current->itemCount);
+        int itemCount = 0;
+        QDirIterator it(
+            current->path,
+            QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
+            QDirIterator::NoIteratorFlags);
 
-        for (const QFileInfo& info : entries) {
+        while (it.hasNext()) {
             if (state->cancel.load()) break;
+
+            it.next();
+            const QFileInfo info = it.fileInfo();
+            ++itemCount;
 
             auto child    = std::make_shared<DiskNode>();
             child->name   = info.fileName();
@@ -253,16 +399,21 @@ void DiskScanner::scanDir(DiskNode*                   scanRoot,
 
             current->children.push_back(std::move(child));
 
-            if (localFiles > 0 && localFiles % 500 == 0) {
+            const qint64 nowMs = progressTimer.elapsed();
+            if (localFiles > 0 && (nowMs - lastProgressMs) >= 150) {
                 state->files += localFiles;
                 state->bytes += localBytes;
                 localFiles    = 0;
                 localBytes    = 0;
+                lastProgressMs = nowMs;
                 if (scanner)
                     emit scanner->progressUpdate(
                         state->files.load(), state->bytes.load(), current->path);
             }
         }
+
+        current->itemCount = itemCount;
+        current->children.squeeze();
     }
 
     state->files += localFiles;
@@ -276,18 +427,7 @@ void DiskScanner::scanDir(DiskNode*                   scanRoot,
 
     if (state->cancel.load()) return;
 
-    wintools::logger::Logger::log(kLog, wintools::logger::Severity::Pass,
-        QStringLiteral("[thread] Phase 2: accumulating sizes for %1 nodes.")
-            .arg(static_cast<int>(allNodes.size())));
-
-    for (int i = static_cast<int>(allNodes.size()) - 1; i >= 0; --i) {
-        DiskNode* n = allNodes[i];
-        if (!n->isDir) continue;
-        qint64 total = 0;
-        for (const auto& child : n->children)
-            total += child->size;
-        n->size = total;
-    }
+    accumulateSizes(scanRoot);
 }
 
 }

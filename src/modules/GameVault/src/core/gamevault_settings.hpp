@@ -1,7 +1,5 @@
 #pragma once
 
-// GameVault: gamevault settings manages core logic and state.
-
 #include "game_entry.hpp"
 
 #include <QString>
@@ -43,6 +41,9 @@ public:
                                       const QString& trackingId);
 
     void    clearGameExecutableOverride(const QString& locatorKey);
+
+    QString steamGridDbApiKey() const;
+    void    setSteamGridDbApiKey(const QString& key);
 
 private:
     GameVaultSettings() = default;

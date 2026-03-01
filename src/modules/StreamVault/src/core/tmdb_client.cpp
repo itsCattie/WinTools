@@ -12,8 +12,6 @@
 #include <QUrlQuery>
 #include <QDateTime>
 
-// StreamVault: tmdb client manages core logic and state.
-
 namespace wintools::streamvault {
 
 static constexpr const char* kLog = "StreamVault/TmdbClient";
@@ -93,6 +91,40 @@ void TmdbClient::fetchWatchProviders(int tmdbId, MediaType type) {
             this, [this, tmdbId, reply]() { onWatchProvidersReply(tmdbId, reply); });
 }
 
+void TmdbClient::fetchExternalIds(int tmdbId, MediaType type) {
+    if (!hasApiKey()) return;
+
+    const QString endpoint = (type == MediaType::Movie)
+        ? QStringLiteral("https://api.themoviedb.org/3/movie/%1/external_ids").arg(tmdbId)
+        : QStringLiteral("https://api.themoviedb.org/3/tv/%1/external_ids").arg(tmdbId);
+
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("api_key"), m_apiKey);
+
+    QUrl url(endpoint);
+    url.setQuery(q);
+
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::UserAgentHeader, "WinTools/1.0");
+
+    QNetworkReply* reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, tmdbId, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            reply->deleteLater();
+            return;
+        }
+        const QByteArray data = reply->readAll();
+        reply->deleteLater();
+
+        QJsonParseError parseErr;
+        const QJsonDocument doc = QJsonDocument::fromJson(data, &parseErr);
+        if (parseErr.error != QJsonParseError::NoError) return;
+
+        const QString imdbId = doc.object().value("imdb_id").toString();
+        emit externalIdsLoaded(tmdbId, imdbId);
+    });
+}
+
 void TmdbClient::fetchPoster(int tmdbId, const QString& posterPath) {
     if (posterPath.isEmpty()) return;
 
@@ -114,6 +146,98 @@ void TmdbClient::cancelAll() {
         old->abort();
         old->deleteLater();
     }
+}
+
+void TmdbClient::fetchTvSeasons(int tmdbId) {
+    if (m_apiKey.isEmpty()) return;
+
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("api_key"), m_apiKey);
+    q.addQueryItem(QStringLiteral("language"), resolveLanguage());
+
+    QUrl url(QStringLiteral("https://api.themoviedb.org/3/tv/%1").arg(tmdbId));
+    url.setQuery(q);
+
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::UserAgentHeader, "WinTools/1.0");
+
+    QNetworkReply* reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, tmdbId, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            reply->deleteLater();
+            return;
+        }
+        const QByteArray data = reply->readAll();
+        reply->deleteLater();
+
+        QJsonParseError pe;
+        const QJsonDocument doc = QJsonDocument::fromJson(data, &pe);
+        if (pe.error != QJsonParseError::NoError) return;
+
+        const QJsonArray arr = doc.object().value("seasons").toArray();
+        QVector<TvSeasonSummary> seasons;
+        for (const QJsonValue& v : arr) {
+            if (!v.isObject()) continue;
+            const QJsonObject obj = v.toObject();
+            TvSeasonSummary s;
+            s.seasonNumber = obj.value("season_number").toInt();
+            s.episodeCount = obj.value("episode_count").toInt();
+            s.name = obj.value("name").toString();
+            if (s.episodeCount > 0)
+                seasons.append(s);
+        }
+
+        wintools::logger::Logger::log(kLog, wintools::logger::Severity::Pass,
+            QStringLiteral("TV seasons loaded."),
+            QStringLiteral("tmdbId=%1 seasons=%2").arg(tmdbId).arg(seasons.size()));
+        emit tvSeasonsLoaded(tmdbId, seasons);
+    });
+}
+
+void TmdbClient::fetchSeasonEpisodes(int tmdbId, int seasonNumber) {
+    if (m_apiKey.isEmpty()) return;
+
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("api_key"), m_apiKey);
+    q.addQueryItem(QStringLiteral("language"), resolveLanguage());
+
+    QUrl url(QStringLiteral("https://api.themoviedb.org/3/tv/%1/season/%2").arg(tmdbId).arg(seasonNumber));
+    url.setQuery(q);
+
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::UserAgentHeader, "WinTools/1.0");
+
+    QNetworkReply* reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, tmdbId, seasonNumber, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            reply->deleteLater();
+            return;
+        }
+        const QByteArray data = reply->readAll();
+        reply->deleteLater();
+
+        QJsonParseError pe;
+        const QJsonDocument doc = QJsonDocument::fromJson(data, &pe);
+        if (pe.error != QJsonParseError::NoError) return;
+
+        const QJsonArray arr = doc.object().value("episodes").toArray();
+        QVector<TvEpisodeSummary> episodes;
+        for (const QJsonValue& v : arr) {
+            if (!v.isObject()) continue;
+            const QJsonObject obj = v.toObject();
+            TvEpisodeSummary ep;
+            ep.episodeNumber = obj.value("episode_number").toInt();
+            ep.name = obj.value("name").toString();
+            ep.airDate = obj.value("air_date").toString();
+            ep.overview = obj.value("overview").toString();
+            episodes.append(ep);
+        }
+
+        wintools::logger::Logger::log(kLog, wintools::logger::Severity::Pass,
+            QStringLiteral("Season episodes loaded."),
+            QStringLiteral("tmdbId=%1 season=%2 episodes=%3").arg(tmdbId).arg(seasonNumber).arg(episodes.size()));
+        emit seasonEpisodesLoaded(tmdbId, seasonNumber, episodes);
+    });
 }
 
 void TmdbClient::onSearchReply(QNetworkReply* reply) {
@@ -195,7 +319,9 @@ void TmdbClient::onWatchProvidersReply(int tmdbId, QNetworkReply* reply) {
 
         if (flatrate.isEmpty()) continue;
 
-        QList<ProviderEntry> providers;
+        CountryProviders cp;
+        cp.link = countryData.value("link").toString();
+
         for (const QJsonValue& v : flatrate) {
             if (!v.isObject()) continue;
             const QJsonObject obj = v.toObject();
@@ -203,11 +329,11 @@ void TmdbClient::onWatchProvidersReply(int tmdbId, QNetworkReply* reply) {
             pe.id       = obj.value("provider_id").toInt();
             pe.name     = obj.value("provider_name").toString();
             pe.logoPath = obj.value("logo_path").toString();
-            providers.append(pe);
+            cp.providers.append(pe);
         }
 
-        if (!providers.isEmpty())
-            byCountry.insert(countryCode, providers);
+        if (!cp.providers.isEmpty())
+            byCountry.insert(countryCode, cp);
     }
 
     wintools::logger::Logger::log(kLog, wintools::logger::Severity::Pass,

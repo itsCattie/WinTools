@@ -10,8 +10,6 @@
 #include <QJsonObject>
 #include <QStandardPaths>
 
-// WinTools: hotkey config manages shared infrastructure.
-
 namespace wintools::hotkeys {
 
 namespace {
@@ -68,6 +66,13 @@ QList<HotkeyBinding> HotkeyConfig::defaults() {
             .keyString = "T",
             .modifiers = { "Ctrl", "Alt" },
             .enabled   = false,
+        },
+
+        HotkeyBinding{
+            .action    = { "taskmanager.toggle_profiler", "AdvancedTaskManager", "toggle_profiler" },
+            .keyString = "P",
+            .modifiers = { "Ctrl", "Alt" },
+            .enabled   = true,
         },
 
         HotkeyBinding{

@@ -4,10 +4,10 @@
 #include "modules/mediabar/src/base/mediabar_controller.hpp"
 #include "modules/disksentinel/src/ui/disk_sentinel_window.hpp"
 #include "modules/AdvancedTaskManager/src/ui/task_manager_window.hpp"
+#include "modules/AdvancedTaskManager/src/ui/profiler_overlay_controller.hpp"
 #include "modules/GameVault/src/ui/gamevault_window.hpp"
 #include "modules/StreamVault/src/ui/streamvault_window.hpp"
-
-// module_provider.cpp: module provider manages feature behavior.
+#include "modules/AudioMaster/src/ui/audiomaster_window.hpp"
 
 namespace wintools::modules {
 
@@ -15,6 +15,15 @@ namespace {
 
 void smartLaunchMediaBar(QWidget* ) {
     MediaBarController::instance()->toggle();
+}
+
+template<typename WindowT>
+void showModuleWindow(QWidget* parent) {
+    auto* win = new WindowT(parent);
+    win->setAttribute(Qt::WA_DeleteOnClose, true);
+    win->show();
+    win->raise();
+    win->activateWindow();
 }
 
 }
@@ -41,23 +50,33 @@ std::vector<ModuleEntry> ModuleProvider::loadModules() {
 
     modules.push_back(std::move(mediabar));
 
+    ModuleEntry audiomaster;
+    audiomaster.name     = "AudioMaster";
+    audiomaster.iconPath = QStringLiteral(":/icons/modules/audiomaster.svg");
+    audiomaster.enabled  = true;
+    audiomaster.launch = [](QWidget* parent) {
+        showModuleWindow<wintools::audiomaster::AudioMasterWindow>(parent);
+    };
+    audiomaster.actions["open"] = []() {
+        showModuleWindow<wintools::audiomaster::AudioMasterWindow>(nullptr);
+    };
+    audiomaster.actions["rotate_output"] = []() {
+        wintools::audiomaster::rotateLinkedOutputDevice();
+    };
+    audiomaster.actions["rotate_input"] = []() {
+        wintools::audiomaster::rotateLinkedInputDevice();
+    };
+    modules.push_back(std::move(audiomaster));
+
     ModuleEntry disksentinel;
     disksentinel.name     = "DiskSentinel";
     disksentinel.iconPath = QStringLiteral(":/icons/modules/disksentinel.svg");
     disksentinel.enabled  = true;
     disksentinel.launch  = [](QWidget* parent) {
-        auto* win = new disksentinel::DiskSentinelWindow(parent);
-        win->setAttribute(Qt::WA_DeleteOnClose, true);
-        win->show();
-        win->raise();
-        win->activateWindow();
+        showModuleWindow<disksentinel::DiskSentinelWindow>(parent);
     };
     disksentinel.actions["open"] = []() {
-        auto* win = new disksentinel::DiskSentinelWindow(nullptr);
-        win->setAttribute(Qt::WA_DeleteOnClose, true);
-        win->show();
-        win->raise();
-        win->activateWindow();
+        showModuleWindow<disksentinel::DiskSentinelWindow>(nullptr);
     };
     modules.push_back(std::move(disksentinel));
 
@@ -66,18 +85,13 @@ std::vector<ModuleEntry> ModuleProvider::loadModules() {
     atm.iconPath = QStringLiteral(":/icons/modules/taskmanager.svg");
     atm.enabled  = true;
     atm.launch  = [](QWidget* parent) {
-        auto* win = new wintools::taskmanager::TaskManagerWindow(parent);
-        win->setAttribute(Qt::WA_DeleteOnClose, true);
-        win->show();
-        win->raise();
-        win->activateWindow();
+        showModuleWindow<wintools::taskmanager::TaskManagerWindow>(parent);
     };
     atm.actions["open"] = []() {
-        auto* win = new wintools::taskmanager::TaskManagerWindow(nullptr);
-        win->setAttribute(Qt::WA_DeleteOnClose, true);
-        win->show();
-        win->raise();
-        win->activateWindow();
+        showModuleWindow<wintools::taskmanager::TaskManagerWindow>(nullptr);
+    };
+    atm.actions["toggle_profiler"] = []() {
+        wintools::taskmanager::ProfilerOverlayController::instance()->toggleOverlay();
     };
     modules.push_back(std::move(atm));
 
@@ -86,18 +100,10 @@ std::vector<ModuleEntry> ModuleProvider::loadModules() {
     gamevault.iconPath = QStringLiteral(":/icons/modules/gamevault.svg");
     gamevault.enabled  = true;
     gamevault.launch  = [](QWidget* parent) {
-        auto* win = new wintools::gamevault::GameVaultWindow(parent);
-        win->setAttribute(Qt::WA_DeleteOnClose, true);
-        win->show();
-        win->raise();
-        win->activateWindow();
+        showModuleWindow<wintools::gamevault::GameVaultWindow>(parent);
     };
     gamevault.actions["open"] = []() {
-        auto* win = new wintools::gamevault::GameVaultWindow(nullptr);
-        win->setAttribute(Qt::WA_DeleteOnClose, true);
-        win->show();
-        win->raise();
-        win->activateWindow();
+        showModuleWindow<wintools::gamevault::GameVaultWindow>(nullptr);
     };
     modules.push_back(std::move(gamevault));
 
@@ -106,18 +112,10 @@ std::vector<ModuleEntry> ModuleProvider::loadModules() {
     streamvault.iconPath = QStringLiteral(":/icons/modules/streamvault.svg");
     streamvault.enabled  = true;
     streamvault.launch  = [](QWidget* parent) {
-        auto* win = new wintools::streamvault::StreamVaultWindow(parent);
-        win->setAttribute(Qt::WA_DeleteOnClose, true);
-        win->show();
-        win->raise();
-        win->activateWindow();
+        showModuleWindow<wintools::streamvault::StreamVaultWindow>(parent);
     };
     streamvault.actions["open"] = []() {
-        auto* win = new wintools::streamvault::StreamVaultWindow(nullptr);
-        win->setAttribute(Qt::WA_DeleteOnClose, true);
-        win->show();
-        win->raise();
-        win->activateWindow();
+        showModuleWindow<wintools::streamvault::StreamVaultWindow>(nullptr);
     };
     modules.push_back(std::move(streamvault));
 
@@ -126,18 +124,10 @@ std::vector<ModuleEntry> ModuleProvider::loadModules() {
     logviewer.iconPath = QStringLiteral(":/icons/modules/logviewer.svg");
     logviewer.enabled  = true;
     logviewer.launch  = [](QWidget* parent) {
-        auto* win = new wintools::logviewer::LogViewerWindow(parent);
-        win->setAttribute(Qt::WA_DeleteOnClose, true);
-        win->show();
-        win->raise();
-        win->activateWindow();
+        showModuleWindow<wintools::logviewer::LogViewerWindow>(parent);
     };
     logviewer.actions["open"] = []() {
-        auto* win = new wintools::logviewer::LogViewerWindow(nullptr);
-        win->setAttribute(Qt::WA_DeleteOnClose, true);
-        win->show();
-        win->raise();
-        win->activateWindow();
+        showModuleWindow<wintools::logviewer::LogViewerWindow>(nullptr);
     };
     modules.push_back(std::move(logviewer));
 

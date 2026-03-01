@@ -1,8 +1,7 @@
 #include "game_model.hpp"
+#include "modules/GameVault/src/core/game_tag_store.hpp"
 
 #include <QDateTime>
-
-// GameVault: game model manages model/view data shaping.
 
 namespace wintools::gamevault {
 
@@ -101,6 +100,8 @@ GameFilterProxy::GameFilterProxy(QObject* parent)
     : QSortFilterProxyModel(parent) {
     setFilterCaseSensitivity(Qt::CaseInsensitive);
     setSortCaseSensitivity(Qt::CaseInsensitive);
+    setDynamicSortFilter(true);
+    sort(0, Qt::AscendingOrder);
 }
 
 void GameFilterProxy::setSearchText(const QString& text) {
@@ -121,6 +122,21 @@ void GameFilterProxy::clearPlatformFilter() {
 
 void GameFilterProxy::setInstalledOnly(bool installed) {
     m_installedOnly = installed;
+    invalidateFilter();
+}
+
+void GameFilterProxy::setFavouritesOnly(bool on) {
+    m_favouritesOnly = on;
+    invalidateFilter();
+}
+
+void GameFilterProxy::setTagFilter(const QString& tag) {
+    m_tagFilter = tag;
+    invalidateFilter();
+}
+
+void GameFilterProxy::clearTagFilter() {
+    m_tagFilter.clear();
     invalidateFilter();
 }
 
@@ -152,7 +168,63 @@ bool GameFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex& sourceP
             return false;
     }
 
+    if (m_favouritesOnly || !m_tagFilter.isEmpty()) {
+        const QVariant v = src->data(titleIdx, GameEntryRole);
+        if (v.isValid()) {
+            const auto e = v.value<GameEntry>();
+            const QString platStr = platformName(e.platform);
+            if (m_favouritesOnly && !GameTagStore::instance().isFavourite(platStr, e.platformId))
+                return false;
+            if (!m_tagFilter.isEmpty() && !GameTagStore::instance().hasTag(platStr, e.platformId, m_tagFilter))
+                return false;
+        }
+    }
+
     return true;
+}
+
+void GameFilterProxy::setSortMode(SortMode mode) {
+    m_sortMode = mode;
+    invalidate();
+    sort(0, (mode == SortByPlaytime || mode == SortByLastPlayed || mode == SortByRecentlyAdded)
+             ? Qt::DescendingOrder : Qt::AscendingOrder);
+}
+
+bool GameFilterProxy::lessThan(const QModelIndex& left, const QModelIndex& right) const {
+    const QAbstractItemModel* src = sourceModel();
+    if (!src) return false;
+
+    switch (m_sortMode) {
+    case SortByPlatform: {
+        const QString lp = src->data(src->index(left.row(), GameCol::Platform), Qt::DisplayRole).toString();
+        const QString rp = src->data(src->index(right.row(), GameCol::Platform), Qt::DisplayRole).toString();
+        if (lp != rp) return lp.compare(rp, Qt::CaseInsensitive) < 0;
+
+        const QString ln = src->data(src->index(left.row(), GameCol::Title), Qt::DisplayRole).toString();
+        const QString rn = src->data(src->index(right.row(), GameCol::Title), Qt::DisplayRole).toString();
+        return ln.compare(rn, Qt::CaseInsensitive) < 0;
+    }
+    case SortByPlaytime: {
+        const qint64 lp = src->data(src->index(left.row(), GameCol::Title), RawPlaytimeRole).toLongLong();
+        const qint64 rp = src->data(src->index(right.row(), GameCol::Title), RawPlaytimeRole).toLongLong();
+        return lp < rp;
+    }
+    case SortByLastPlayed: {
+        const qint64 lp = src->data(src->index(left.row(), GameCol::Title), RawLastPlayedRole).toLongLong();
+        const qint64 rp = src->data(src->index(right.row(), GameCol::Title), RawLastPlayedRole).toLongLong();
+        return lp < rp;
+    }
+    case SortByRecentlyAdded: {
+
+        return left.row() < right.row();
+    }
+    case SortByName:
+    default: {
+        const QString ln = src->data(src->index(left.row(), GameCol::Title), Qt::DisplayRole).toString();
+        const QString rn = src->data(src->index(right.row(), GameCol::Title), Qt::DisplayRole).toString();
+        return ln.compare(rn, Qt::CaseInsensitive) < 0;
+    }
+    }
 }
 
 }

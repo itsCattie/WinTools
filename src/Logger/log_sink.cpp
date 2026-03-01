@@ -1,7 +1,5 @@
 #include "logger/log_sink.hpp"
 
-// WinTools: log sink manages feature behavior.
-
 namespace wintools::logger {
 
 LogSink::LogSink(QObject* parent) : QObject(parent) {
@@ -26,13 +24,27 @@ quint64 LogSink::totalReceived() const {
 }
 
 void LogSink::appendEntry(const wintools::logger::LogEntry& entry) {
+    const QString key = QString("%1|%2|%3").arg(entry.source, entry.reason, entry.data);
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+
     {
         std::lock_guard<std::mutex> g(m_mutex);
+
+        const qint64 last = m_lastSeenMs.value(key, 0);
+        if (last > 0 && (nowMs - last) < m_dedupWindowMs) {
+
+            ++m_totalReceived;
+            return;
+        }
+
+        m_lastSeenMs.insert(key, nowMs);
+
         if (m_buffer.size() >= kMaxEntries)
             m_buffer.removeFirst();
         m_buffer.append(entry);
         ++m_totalReceived;
     }
+
     emit entryAdded(entry);
 }
 

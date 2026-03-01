@@ -1,7 +1,5 @@
 #pragma once
 
-// AdvancedTaskManager: perf graph widget manages UI behavior and presentation.
-
 #include <QWidget>
 #include <QPoint>
 #include <deque>
@@ -25,6 +23,9 @@ public:
     void setLineColor(const QColor& color);
     void setGridColor(const QColor& color);
     void setBackground(const QColor& color);
+    void setTextColor(const QColor& color);
+    void setSubtleTextColor(const QColor& color);
+    void setCrosshairColor(const QColor& color);
     void setMaxValue(double maxValue);
 
     void setValueFormat(ValueFormat fmt);
@@ -51,6 +52,9 @@ private:
     QColor        m_gridColor   { 0x30, 0x30, 0x30 };
     QColor        m_fillColor;
     QColor        m_background  { 0x10, 0x10, 0x10 };
+    QColor        m_textColor   { 0xCC, 0xCC, 0xCC };
+    QColor        m_subtleTextColor { 0x88, 0x88, 0x88 };
+    QColor        m_crosshairColor { 0xFF, 0xFF, 0xFF, 0x80 };
     double        m_maxValue    { 100.0 };
     int           m_historyLen  { 60 };
     ValueFormat   m_valueFormat { ValueFormat::Percent };

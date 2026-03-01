@@ -1,5 +1,3 @@
-// MediaBar: mediabar controller manages feature behavior.
-
 #include "modules/mediabar/src/base/mediabar_controller.hpp"
 
 #include "modules/mediabar/src/app/app_main.hpp"

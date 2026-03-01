@@ -1,7 +1,5 @@
 #pragma once
 
-// WinTools: update manages feature behavior.
-
 #include <QString>
 #include <QUrl>
 

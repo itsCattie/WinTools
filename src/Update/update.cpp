@@ -26,8 +26,6 @@
 #include <QUrlQuery>
 #include <QVersionNumber>
 
-// WinTools: update manages feature behavior.
-
 namespace {
 constexpr const char* LogSource = "Update";
 constexpr const char* kReleaseApi = "https://api.github.com/repos/itsCattie/WinTools/releases/latest";
@@ -42,8 +40,41 @@ QString normalizedVersion(QString version) {
     return version;
 }
 
-QVersionNumber parseVersion(const QString& version) {
-    return QVersionNumber::fromString(normalizedVersion(version));
+QVersionNumber parseComparableVersion(const QString& version) {
+    const QString normalized = normalizedVersion(version);
+    QVersionNumber direct = QVersionNumber::fromString(normalized);
+    if (!direct.isNull()) {
+        return direct;
+    }
+
+    static const QRegularExpression semverPrefixRe(
+        QStringLiteral("^(\\d+(?:\\.\\d+)*)"));
+    const QRegularExpressionMatch match = semverPrefixRe.match(normalized);
+    if (match.hasMatch()) {
+        return QVersionNumber::fromString(match.captured(1));
+    }
+
+    return {};
+}
+
+bool isNewerVersion(const QString& currentVersion, const QString& latestVersion) {
+    const QString currentNormalized = normalizedVersion(currentVersion);
+    const QString latestNormalized = normalizedVersion(latestVersion);
+
+    if (latestNormalized.isEmpty()) {
+        return false;
+    }
+    if (currentNormalized == latestNormalized) {
+        return false;
+    }
+
+    const QVersionNumber currentComparable = parseComparableVersion(currentNormalized);
+    const QVersionNumber latestComparable = parseComparableVersion(latestNormalized);
+    if (!currentComparable.isNull() && !latestComparable.isNull()) {
+        return QVersionNumber::compare(latestComparable, currentComparable) > 0;
+    }
+
+    return false;
 }
 
 bool isLikelyWindowsZip(const QString& fileName) {
@@ -56,8 +87,7 @@ bool runBlockingRequest(const QNetworkRequest& request,
                         QByteArray* body,
                         QString* errorOut,
                         int* statusOut = nullptr) {
-    // Update checks are executed synchronously from the caller perspective.
-    // Keep this helper bounded with a local event loop and hard timeout.
+
     QNetworkAccessManager manager;
     QEventLoop loop;
     QTimer timer;
@@ -90,7 +120,7 @@ bool runBlockingRequest(const QNetworkRequest& request,
             QString detail;
             QJsonParseError parseErr;
             const QJsonDocument errDoc = QJsonDocument::fromJson(responseBody, &parseErr);
-            // GitHub API error bodies usually include a machine-readable "message" field.
+
             if (errDoc.isObject()) {
                 const QJsonObject obj = errDoc.object();
                 const QString apiMessage = obj.value("message").toString().trimmed();
@@ -230,8 +260,7 @@ ReleaseInfo Update::checkForUpdates() {
     int statusCode = 0;
     if (!runBlockingRequest(req, &body, &err, &statusCode)) {
         if (statusCode == 404) {
-            // /releases/latest returns 404 when no GitHub Release exists yet.
-            // Fall back to tags so users can still be informed about newer builds.
+
             wintools::logger::Logger::log(LogSource, wintools::logger::Severity::Warning,
                                           "No published GitHub release found; falling back to latest tag.");
 
@@ -268,15 +297,7 @@ ReleaseInfo Update::checkForUpdates() {
             const QJsonObject latestTag = tags.first().toObject();
             out.latestVersion = latestTag.value("name").toString().trimmed();
 
-            const QVersionNumber current = parseVersion(out.currentVersion);
-            const QVersionNumber latest = parseVersion(out.latestVersion);
-            if (!current.isNull() && !latest.isNull()) {
-                out.updateAvailable = QVersionNumber::compare(latest, current) > 0;
-            } else {
-                // Fallback for non-semver tags: compare normalized strings.
-                out.updateAvailable = !normalizedVersion(out.latestVersion).isEmpty()
-                                    && normalizedVersion(out.latestVersion) != normalizedVersion(out.currentVersion);
-            }
+            out.updateAvailable = isNewerVersion(out.currentVersion, out.latestVersion);
 
             out.success = true;
             out.errorMessage.clear();
@@ -320,14 +341,7 @@ ReleaseInfo Update::checkForUpdates() {
         }
     }
 
-    const QVersionNumber current = parseVersion(out.currentVersion);
-    const QVersionNumber latest = parseVersion(out.latestVersion);
-    if (!current.isNull() && !latest.isNull()) {
-        out.updateAvailable = QVersionNumber::compare(latest, current) > 0;
-    } else {
-        out.updateAvailable = !normalizedVersion(out.latestVersion).isEmpty()
-                            && normalizedVersion(out.latestVersion) != normalizedVersion(out.currentVersion);
-    }
+    out.updateAvailable = isNewerVersion(out.currentVersion, out.latestVersion);
 
     out.success = true;
     return out;
@@ -341,7 +355,7 @@ bool Update::applyUpdate(const ReleaseInfo& release, QWidget* parent) {
     if (!release.downloadUrl.isValid()) {
         if (release.releasePageUrl.isValid()) {
             QDesktopServices::openUrl(release.releasePageUrl);
-            return true;
+            return false;
         }
         return false;
     }

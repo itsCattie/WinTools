@@ -11,8 +11,6 @@
 #include <QStandardPaths>
 #include <QTextStream>
 
-// GameVault: retroarch scanner manages discovery and scanning flow.
-
 namespace wintools::gamevault {
 
 namespace {
@@ -49,6 +47,7 @@ QString systemTagFromDb(const QString& dbName) {
 
 QString RetroArchScanner::findRetroArchExe() const {
 
+#ifdef Q_OS_WIN
     QSettings reg(R"(HKEY_CLASSES_ROOT\retroarch\shell\open\command)", QSettings::NativeFormat);
     QString cmd = reg.value(".").toString();
     if (!cmd.isEmpty()) {
@@ -61,6 +60,20 @@ QString RetroArchScanner::findRetroArchExe() const {
         QStringLiteral("C:/RetroArch/retroarch.exe"),
         qEnvironmentVariable("APPDATA") + "/../Local/RetroArch/retroarch.exe"
     };
+#elif defined(Q_OS_MACOS)
+    const QStringList fallbackPaths = {
+        QStringLiteral("/Applications/RetroArch.app/Contents/MacOS/RetroArch"),
+        QDir::homePath() + "/Library/Application Support/RetroArch/retroarch"
+    };
+#elif defined(Q_OS_LINUX)
+    const QStringList fallbackPaths = {
+        QStringLiteral("/usr/bin/retroarch"),
+        QDir::homePath() + "/.config/retroarch/retroarch",
+        QDir::homePath() + "/.var/app/org.libretro.RetroArch/config/retroarch/retroarch"
+    };
+#else
+    const QStringList fallbackPaths;
+#endif
     for (const QString& p : fallbackPaths) {
         if (QFile::exists(p)) return QDir::fromNativeSeparators(p);
     }
@@ -75,9 +88,21 @@ QString RetroArchScanner::findRetroArchDataDir() const {
         if (QFile::exists(dir + "/retroarch.cfg")) return dir;
     }
 
+#ifdef Q_OS_WIN
     const QString ad = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     const QString candidate = QFileInfo(ad).absolutePath() + "/RetroArch";
     if (QDir(candidate).exists()) return candidate;
+#elif defined(Q_OS_MACOS)
+    const QString macDir = QDir::homePath() + "/Library/Application Support/RetroArch";
+    if (QDir(macDir).exists()) return macDir;
+#elif defined(Q_OS_LINUX)
+    for (const QString& p : {
+             QDir::homePath() + "/.config/retroarch",
+             QDir::homePath() + "/.var/app/org.libretro.RetroArch/config/retroarch"
+         }) {
+        if (QDir(p).exists()) return p;
+    }
+#endif
     return {};
 }
 

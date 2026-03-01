@@ -1,7 +1,5 @@
 #pragma once
 
-// GameVault: game library manages core logic and state.
-
 #include "game_entry.hpp"
 #include <QObject>
 #include <QRunnable>

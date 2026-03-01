@@ -10,8 +10,6 @@
 #include <QSettings>
 #include <QTextStream>
 
-// GameVault: steam scanner manages discovery and scanning flow.
-
 namespace wintools::gamevault {
 
 namespace {
@@ -403,10 +401,24 @@ QHash<QString, PlaytimeData> buildPlaytimeMap(const QString& steamPath) {
 QVector<GameEntry> SteamScanner::scan() const {
     QVector<GameEntry> results;
 
+#ifdef Q_OS_WIN
     QSettings reg(R"(HKEY_CURRENT_USER\Software\Valve\Steam)", QSettings::NativeFormat);
     QString steamPath = reg.value("SteamPath").toString();
+#else
+    QString steamPath;
+#if defined(Q_OS_MACOS)
+    const QString macSteam = QDir::homePath() + "/Library/Application Support/Steam";
+    if (QDir(macSteam).exists()) steamPath = macSteam;
+#elif defined(Q_OS_LINUX)
+    for (const QString& p : {
+             QDir::homePath() + "/.steam/steam",
+             QDir::homePath() + "/.local/share/Steam"
+         }) {
+        if (QDir(p).exists()) { steamPath = p; break; }
+    }
+#endif
+#endif
     if (steamPath.isEmpty()) {
-
         steamPath = QDir::homePath() + "/.steam/root";
         if (!QDir(steamPath).exists())
             return results;

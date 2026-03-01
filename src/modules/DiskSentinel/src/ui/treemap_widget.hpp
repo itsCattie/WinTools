@@ -1,13 +1,13 @@
 #pragma once
 
-// DiskSentinel: treemap widget manages UI behavior and presentation.
-
 #include "modules/disksentinel/src/core/disk_node.hpp"
 
 #include <QWidget>
 #include <QVector>
 #include <QPair>
 #include <QRectF>
+
+namespace wintools::themes { struct ThemePalette; }
 
 namespace wintools::disksentinel {
 
@@ -38,18 +38,27 @@ private:
     struct CellRecord {
         QRectF    rect;
         DiskNode* node = nullptr;
+        int       depth = 0;
     };
 
-    void   renderRoot(QPainter& p);
+    void   renderRoot(QPainter& p,
+                      const wintools::themes::ThemePalette& theme,
+                      bool darkTheme);
     void   layoutItems(QPainter& p, QRectF rect,
                        const QVector<DiskNode*>& items,
-                       qint64 total, int depth);
-    void   drawNode(QPainter& p, QRectF rect, DiskNode* node, int depth);
+                       qint64 total, int depth,
+                       const wintools::themes::ThemePalette& theme,
+                       bool darkTheme);
+    void   drawNode(QPainter& p, QRectF rect, DiskNode* node, int depth,
+                    const wintools::themes::ThemePalette& theme,
+                    bool darkTheme);
 
-    static QColor colorForNode(DiskNode* node, int depth);
-    static QColor lightenForDepth(QColor base, int depth);
+    static QColor colorForNode(DiskNode* node, int depth,
+                               const wintools::themes::ThemePalette& theme,
+                               bool darkTheme);
 
     DiskNode* hitTest(const QPointF& pos) const;
+    QRectF    nodeRect(DiskNode* node) const;
 
     DiskNode*           m_root    = nullptr;
     DiskNode*           m_hovered = nullptr;

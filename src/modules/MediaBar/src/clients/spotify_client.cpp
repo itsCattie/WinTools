@@ -27,8 +27,6 @@
 
 #include <limits>
 
-// MediaBar: spotify client manages service client integration.
-
 namespace {
 
 constexpr auto API_BASE = "https://api.spotify.com/v1";
@@ -515,7 +513,7 @@ bool SpotifyClient::ensureUserAccessToken() const {
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     if (!cachedAccessToken_.isEmpty() && accessTokenExpiresAtMs_ > (now + 60000)) {
-        debuglog::trace("Spotify", "Using cached access token.");
+
         return true;
     }
 
@@ -617,8 +615,7 @@ bool SpotifyClient::isAvailable() const {
 }
 
 std::optional<QJsonObject> SpotifyClient::requestJson(const QString& method, const QString& path, const QUrlQuery& query, const QByteArray& body) {
-    debuglog::trace("Spotify", QString("requestJson method=%1 path=%2 query=%3 bodyBytes=%4")
-        .arg(method, path, query.query(QUrl::FullyEncoded), QString::number(body.size())));
+
     if (QThread::currentThread() != network_.thread()) {
         return std::nullopt;
     }
@@ -674,8 +671,10 @@ std::optional<QJsonObject> SpotifyClient::requestJson(const QString& method, con
         return std::nullopt;
     }
 
-    debuglog::trace("Spotify", QString("requestJson succeeded path=%1 status=%2")
-        .arg(path, QString::number(statusCode)));
+    if (statusCode != 204) {
+        debuglog::trace("Spotify", QString("requestJson succeeded path=%1 status=%2")
+            .arg(path, QString::number(statusCode)));
+    }
     if (payload.isEmpty()) {
         return QJsonObject{};
     }
@@ -698,8 +697,7 @@ bool SpotifyClient::requestNoContentDetailed(
     const QByteArray& body,
     int* statusCodeOut,
     QString* responseBodyOut) {
-    debuglog::trace("Spotify", QString("requestNoContent method=%1 path=%2 query=%3 bodyBytes=%4")
-        .arg(method, path, query.query(QUrl::FullyEncoded), QString::number(body.size())));
+
     if (QThread::currentThread() != network_.thread()) {
         if (statusCodeOut) {
             *statusCodeOut = 0;
@@ -774,8 +772,6 @@ bool SpotifyClient::requestNoContentDetailed(
         return false;
     }
 
-    debuglog::trace("Spotify", QString("requestNoContent finished path=%1 status=%2")
-        .arg(path, QString::number(statusCode)));
     return statusCode >= 200 && statusCode < 300;
 }
 
@@ -808,11 +804,16 @@ PlaybackInfo SpotifyClient::parsePlayback(const QJsonObject& obj) {
         info.albumArt = images.first().toObject().value("url").toString();
     }
 
+    const QJsonObject device = obj.value("device").toObject();
+    if (device.contains("volume_percent")) {
+        info.volumePercent = qBound(0, device.value("volume_percent").toInt(-1), 100);
+    }
+
     return info;
 }
 
 std::optional<PlaybackInfo> SpotifyClient::getCurrentPlayback() {
-    debuglog::trace("Spotify", "getCurrentPlayback called.");
+
     const auto parseIfPlayable = [](const QJsonObject& obj) -> std::optional<PlaybackInfo> {
         if (obj.isEmpty()) {
             return std::nullopt;
@@ -880,6 +881,25 @@ bool SpotifyClient::seekToPosition(qint64 positionMs) {
     return requestNoContent("PUT", "/me/player/seek", query);
 }
 
+std::optional<int> SpotifyClient::getVolumePercent() {
+    auto response = requestJson("GET", "/me/player");
+    if (!response.has_value()) {
+        return std::nullopt;
+    }
+
+    const QJsonObject device = response->value("device").toObject();
+    if (!device.contains("volume_percent")) {
+        return std::nullopt;
+    }
+    return qBound(0, device.value("volume_percent").toInt(0), 100);
+}
+
+bool SpotifyClient::setVolumePercent(int percent) {
+    QUrlQuery query;
+    query.addQueryItem("volume_percent", QString::number(qBound(0, percent, 100)));
+    return requestNoContent("PUT", "/me/player/volume", query);
+}
+
 std::optional<bool> SpotifyClient::getShuffleState() {
     auto response = requestJson("GET", "/me/player");
     if (!response.has_value()) {
@@ -898,6 +918,14 @@ bool SpotifyClient::setShuffleState(bool enabled) {
     QUrlQuery query;
     query.addQueryItem("state", enabled ? "true" : "false");
     return requestNoContent("PUT", "/me/player/shuffle", query);
+}
+
+bool SpotifyClient::setRepeatState(bool enabled) {
+    debuglog::info("Spotify", QString("setRepeatState enabled=%1").arg(enabled ? "1" : "0"));
+    QUrlQuery query;
+
+    query.addQueryItem("state", enabled ? "context" : "off");
+    return requestNoContent("PUT", "/me/player/repeat", query);
 }
 
 std::optional<bool> SpotifyClient::isTrackSaved(const QString& trackId) {
@@ -1001,6 +1029,50 @@ bool SpotifyClient::addToQueue(const QString& uri) {
     QUrlQuery query;
     query.addQueryItem("uri", normalized);
     return requestNoContent("POST", "/me/player/queue", query);
+}
+
+QVector<SpotifyTrackItem> SpotifyClient::getQueue() {
+    QVector<SpotifyTrackItem> out;
+
+    auto response = requestJson("GET", "/me/player/queue");
+    if (!response.has_value()) return out;
+
+    const QJsonObject current = response->value("currently_playing").toObject();
+    if (!current.isEmpty() && current.value("type").toString() == "track") {
+        SpotifyTrackItem item;
+        item.id   = current.value("id").toString();
+        item.name = current.value("name").toString();
+        item.uri  = current.value("uri").toString();
+        item.album = current.value("album").toObject().value("name").toString();
+        const QJsonArray imgs = current.value("album").toObject().value("images").toArray();
+        if (!imgs.isEmpty())
+            item.albumArtUrl = imgs.first().toObject().value("url").toString();
+        const QJsonArray artists = current.value("artists").toArray();
+        if (!artists.isEmpty())
+            item.artist = artists.first().toObject().value("name").toString();
+        out.push_back(item);
+    }
+
+    const QJsonArray queue = response->value("queue").toArray();
+    out.reserve(out.size() + queue.size());
+    for (const auto& val : queue) {
+        const QJsonObject obj = val.toObject();
+        if (obj.value("type").toString() != "track") continue;
+        SpotifyTrackItem item;
+        item.id   = obj.value("id").toString();
+        item.name = obj.value("name").toString();
+        item.uri  = obj.value("uri").toString();
+        item.album = obj.value("album").toObject().value("name").toString();
+        const QJsonArray imgs = obj.value("album").toObject().value("images").toArray();
+        if (!imgs.isEmpty())
+            item.albumArtUrl = imgs.first().toObject().value("url").toString();
+        const QJsonArray artists = obj.value("artists").toArray();
+        if (!artists.isEmpty())
+            item.artist = artists.first().toObject().value("name").toString();
+        out.push_back(item);
+    }
+
+    return out;
 }
 
 QVector<SpotifyTrackItem> SpotifyClient::searchTracks(const QString& queryText, int limit) {

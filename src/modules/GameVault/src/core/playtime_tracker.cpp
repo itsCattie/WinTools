@@ -7,8 +7,6 @@
 #include <QSqlQuery>
 #include <QStandardPaths>
 
-// GameVault: playtime tracker manages core logic and state.
-
 namespace wintools::gamevault {
 
 static constexpr const char* kLog = "GameVault/Playtime";

@@ -1,7 +1,5 @@
 #include "lyrics_timing.hpp"
 
-// MediaBar: lyrics timing manages core logic and state.
-
 namespace mediabar {
 
 int findCurrentLyricLine(const LyricsList& lyrics, qint64 progressMs) {

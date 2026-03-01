@@ -2,16 +2,14 @@
 
 #include <QtTest/QtTest>
 
-// WinTools: unified client integration tests manages feature behavior.
-
 class UnifiedClientIntegrationTests : public QObject {
     Q_OBJECT
 
 private slots:
-    void autoModePrefersActiveSpotify();
-    void autoModePrefersActiveSonosWhenSpotifyPaused();
+    void spotifyModeReturnsSpotifyPlayback();
+    void sonosModeReturnsSonosPlayback();
     void forcedSourceModeUsesSelectedProvider();
-    void transportRoutesToCurrentSourceAndFallbacks();
+    void transportRoutesToCurrentSource();
     void shuffleBehaviorIsSpotifyOnly();
 };
 
@@ -30,13 +28,14 @@ PlaybackInfo playback(QString source, QString track, bool playing) {
 
 }
 
-void UnifiedClientIntegrationTests::autoModePrefersActiveSpotify() {
+void UnifiedClientIntegrationTests::spotifyModeReturnsSpotifyPlayback() {
     UnifiedMusicClient client;
     client.testEnableHooks(true);
 
     client.testSetSpotifyPlayback(playback("spotify", "spotify-track", true));
     client.testSetSonosPlayback(playback("sonos", "sonos-track", true));
 
+    client.setSourceMode(UnifiedMusicClient::SourceMode::Spotify);
     const auto result = client.getCurrentPlayback();
     QVERIFY(result.has_value());
     QCOMPARE(result->trackName, QString("spotify-track"));
@@ -47,20 +46,21 @@ void UnifiedClientIntegrationTests::autoModePrefersActiveSpotify() {
     QCOMPARE(calls.sonosGetPlayback, 0);
 }
 
-void UnifiedClientIntegrationTests::autoModePrefersActiveSonosWhenSpotifyPaused() {
+void UnifiedClientIntegrationTests::sonosModeReturnsSonosPlayback() {
     UnifiedMusicClient client;
     client.testEnableHooks(true);
 
-    client.testSetSpotifyPlayback(playback("spotify", "spotify-paused", false));
-    client.testSetSonosPlayback(playback("sonos", "sonos-playing", true));
+    client.testSetSpotifyPlayback(playback("spotify", "spotify-track", true));
+    client.testSetSonosPlayback(playback("sonos", "sonos-track", true));
 
+    client.setSourceMode(UnifiedMusicClient::SourceMode::Sonos);
     const auto result = client.getCurrentPlayback();
     QVERIFY(result.has_value());
-    QCOMPARE(result->trackName, QString("sonos-playing"));
+    QCOMPARE(result->trackName, QString("sonos-track"));
     QCOMPARE(client.getSourceName(), QString("Sonos"));
 
     const auto calls = client.testCallCounts();
-    QCOMPARE(calls.spotifyGetPlayback, 1);
+    QCOMPARE(calls.spotifyGetPlayback, 0);
     QCOMPARE(calls.sonosGetPlayback, 1);
 }
 
@@ -82,7 +82,7 @@ void UnifiedClientIntegrationTests::forcedSourceModeUsesSelectedProvider() {
     QCOMPARE(sonosResult->trackName, QString("forced-sonos"));
 }
 
-void UnifiedClientIntegrationTests::transportRoutesToCurrentSourceAndFallbacks() {
+void UnifiedClientIntegrationTests::transportRoutesToCurrentSource() {
     UnifiedMusicClient client;
     client.testEnableHooks(true);
     client.testSetTransportResults(
@@ -110,20 +110,6 @@ void UnifiedClientIntegrationTests::transportRoutesToCurrentSourceAndFallbacks()
     QCOMPARE(calls.sonosPlayPause, 0);
     QCOMPARE(calls.spotifySeek, 1);
     QCOMPARE(calls.sonosSeek, 0);
-
-    UnifiedMusicClient fallbackClient;
-    fallbackClient.testEnableHooks(true);
-    fallbackClient.testSetTransportResults(
-        false, true,
-        false, false,
-        false, false,
-        false, false);
-    fallbackClient.setSourceMode(UnifiedMusicClient::SourceMode::Auto);
-    QVERIFY(fallbackClient.nextTrack());
-
-    calls = fallbackClient.testCallCounts();
-    QCOMPARE(calls.spotifyNextTrack, 1);
-    QCOMPARE(calls.sonosNextTrack, 1);
 }
 
 void UnifiedClientIntegrationTests::shuffleBehaviorIsSpotifyOnly() {

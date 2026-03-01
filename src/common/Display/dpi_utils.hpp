@@ -1,7 +1,5 @@
 #pragma once
 
-// WinTools: dpi utils manages shared infrastructure.
-
 namespace wintools::display {
 
 class DpiUtils {

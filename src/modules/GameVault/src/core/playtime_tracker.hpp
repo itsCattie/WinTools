@@ -1,7 +1,5 @@
 #pragma once
 
-// GameVault: playtime tracker manages core logic and state.
-
 #include <QObject>
 #include <QHash>
 #include <QDateTime>

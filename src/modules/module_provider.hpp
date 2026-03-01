@@ -1,7 +1,5 @@
 #pragma once
 
-// module_provider.hpp: module provider manages feature behavior.
-
 #include <functional>
 #include <vector>
 

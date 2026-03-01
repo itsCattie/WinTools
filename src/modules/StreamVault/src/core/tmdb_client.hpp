@@ -1,7 +1,5 @@
 #pragma once
 
-// StreamVault: tmdb client manages core logic and state.
-
 #include "modules/StreamVault/src/core/stream_entry.hpp"
 
 #include <QMap>
@@ -20,7 +18,25 @@ struct ProviderEntry {
     QString logoPath;
 };
 
-using WatchProviderMap = QMap<QString, QList<ProviderEntry>>;
+struct CountryProviders {
+    QString               link;
+    QList<ProviderEntry>  providers;
+};
+
+struct TvSeasonSummary {
+    int seasonNumber{0};
+    int episodeCount{0};
+    QString name;
+};
+
+struct TvEpisodeSummary {
+    int episodeNumber{0};
+    QString name;
+    QString airDate;
+    QString overview;
+};
+
+using WatchProviderMap = QMap<QString, CountryProviders>;
 
 class TmdbClient : public QObject {
     Q_OBJECT
@@ -36,12 +52,20 @@ public:
 
     void fetchWatchProviders(int tmdbId, MediaType type);
 
+    void fetchExternalIds(int tmdbId, MediaType type);
+
+    void fetchTvSeasons(int tmdbId);
+    void fetchSeasonEpisodes(int tmdbId, int seasonNumber);
+
     void cancelAll();
 
 signals:
     void searchFinished(QVector<StreamEntry> results);
     void posterLoaded(int tmdbId, QByteArray imageData);
     void watchProvidersLoaded(int tmdbId, WatchProviderMap byCountry);
+    void externalIdsLoaded(int tmdbId, QString imdbId);
+    void tvSeasonsLoaded(int tmdbId, QVector<TvSeasonSummary> seasons);
+    void seasonEpisodesLoaded(int tmdbId, int season, QVector<TvEpisodeSummary> episodes);
     void error(QString message);
 
 private slots:

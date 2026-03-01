@@ -1,7 +1,5 @@
 #pragma once
 
-// DiskSentinel: disk scanner manages discovery and scanning flow.
-
 #include "modules/disksentinel/src/core/disk_node.hpp"
 
 #include <QDateTime>

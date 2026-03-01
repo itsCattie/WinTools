@@ -1,5 +1,4 @@
 #pragma once
-// GameVault: custom folder scanner manages discovery and scanning flow.
 
 #include "i_game_scanner.hpp"
 

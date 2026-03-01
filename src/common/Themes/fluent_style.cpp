@@ -1,7 +1,5 @@
 #include "common/themes/fluent_style.hpp"
 
-// WinTools: fluent style manages shared infrastructure.
-
 namespace wintools::themes {
 
 static inline QString rgba(const QColor& c, int alpha) {
@@ -122,43 +120,6 @@ QString FluentStyle::inputStyle(const ThemePalette& p) {
         hex(p.foreground),
         hex(p.accent),
         rgba(p.accent, 50)
-    );
-}
-
-QString FluentStyle::sidebarStyle(const ThemePalette& p) {
-    return QStringLiteral(
-        "QFrame#FluentSidebar {"
-        "  background: %1;"
-        "  border-right: 1px solid %2;"
-        "}"
-        "QFrame#FluentSidebar QPushButton {"
-        "  background: transparent;"
-        "  border: none;"
-        "  border-radius: 6px;"
-        "  padding: 8px 12px;"
-        "  text-align: left;"
-        "  color: %3;"
-        "  font-size: 13px;"
-        "}"
-        "QFrame#FluentSidebar QPushButton:hover {"
-        "  background: %4;"
-        "}"
-        "QFrame#FluentSidebar QPushButton:pressed {"
-        "  background: %5;"
-        "}"
-        "QFrame#FluentSidebar QPushButton:checked {"
-        "  background: %6;"
-        "  color: %7;"
-        "  font-weight: 600;"
-        "}"
-    ).arg(
-        hex(p.cardBackground),
-        hex(p.cardBorder),
-        hex(p.foreground),
-        rgba(p.foreground, 15),
-        rgba(p.foreground, 25),
-        rgba(p.accent, 30),
-        hex(p.accent)
     );
 }
 

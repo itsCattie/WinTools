@@ -2,8 +2,6 @@
 
 #include <QtTest/QtTest>
 
-// WinTools: lyrics timing tests manages feature behavior.
-
 class LyricsTimingTests : public QObject {
     Q_OBJECT
 

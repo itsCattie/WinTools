@@ -1,7 +1,5 @@
 #pragma once
 
-// WinTools: hotkey engine manages shared infrastructure.
-
 #include <QAbstractNativeEventFilter>
 #include <QHash>
 #include <QList>

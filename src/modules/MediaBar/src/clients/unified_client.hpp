@@ -1,7 +1,5 @@
 #pragma once
 
-// MediaBar: unified client manages service client integration.
-
 #include "sonos_client.hpp"
 #include "spotify_client.hpp"
 #include "types.hpp"
@@ -11,7 +9,6 @@
 class UnifiedMusicClient {
 public:
     enum class SourceMode {
-        Auto,
         Spotify,
         Sonos
     };
@@ -28,8 +25,11 @@ public:
     bool previousTrack();
     bool playPause();
     bool seekToPosition(qint64 positionMs);
+    std::optional<int> getVolumePercent();
+    bool setVolumePercent(int percent);
     std::optional<bool> getShuffleState();
     std::optional<bool> toggleShuffle();
+    std::optional<bool> setRepeatState(bool enabled);
 
     SpotifyClient& spotify() { return spotify_; }
     SonosClient& sonos() { return sonos_; }
@@ -68,7 +68,7 @@ private:
 
     SpotifyClient spotify_;
     SonosClient sonos_;
-    SourceMode sourceMode_ = SourceMode::Auto;
+    SourceMode sourceMode_ = SourceMode::Spotify;
     QString currentSource_;
 
 #ifdef MEDIABAR_ENABLE_TEST_HOOKS

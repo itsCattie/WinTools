@@ -1,7 +1,5 @@
 #pragma once
 
-// WinTools: fluent style manages shared infrastructure.
-
 #include "common/themes/window_colour.hpp"
 #include <QString>
 
@@ -17,8 +15,6 @@ public:
     static QString buttonStyle(const ThemePalette& p);
 
     static QString inputStyle(const ThemePalette& p);
-
-    static QString sidebarStyle(const ThemePalette& p);
 
     static QString tabStyle(const ThemePalette& p);
 

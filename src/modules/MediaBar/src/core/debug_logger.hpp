@@ -1,7 +1,5 @@
 #pragma once
 
-// MediaBar: debug logger manages core logic and state.
-
 #include <QDateTime>
 #include <QDir>
 #include <QFile>

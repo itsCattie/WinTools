@@ -1,7 +1,5 @@
 #pragma once
 
-// WinTools: tray manager manages shared infrastructure.
-
 #include <QObject>
 #include <QSystemTrayIcon>
 #include <vector>
@@ -20,6 +18,11 @@ public:
     explicit TrayManager(QObject* parent = nullptr);
 
     void updateModules(const std::vector<wintools::modules::ModuleEntry>& modules);
+
+    void setTooltip(const QString& text);
+    void showMessage(const QString& title, const QString& message,
+                     QSystemTrayIcon::MessageIcon icon = QSystemTrayIcon::Information,
+                     int msecs = 5000);
 
     void show();
 

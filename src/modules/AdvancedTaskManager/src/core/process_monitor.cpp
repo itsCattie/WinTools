@@ -1,22 +1,28 @@
-// AdvancedTaskManager: process monitor manages core logic and state.
-
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <winioctl.h>
-#include <tlhelp32.h>
-#include <psapi.h>
-#include <sddl.h>
-#include <lmcons.h>
-#include <iphlpapi.h>
-#include <powerbase.h>
-
-#include <cstdlib>
-
 #include "modules/AdvancedTaskManager/src/core/process_monitor.hpp"
 #include "logger/logger.hpp"
 
 #include <QSysInfo>
 #include <algorithm>
+
+#ifdef _WIN32
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <winioctl.h>
+#include <tlhelp32.h>
+#include <psapi.h>
+#include <pdh.h>
+#include <pdhmsg.h>
+#include <sddl.h>
+#include <lmcons.h>
+#include <iphlpapi.h>
+#include <tcpmib.h>
+#include <udpmib.h>
+#include <powerbase.h>
+
+#include <cstdlib>
 
 static inline quint64 ftToU64(const FILETIME& ft) {
     ULARGE_INTEGER u;
@@ -54,9 +60,51 @@ ProcessMonitor::ProcessMonitor(QObject* parent)
         m_ntResume  = reinterpret_cast<NtResumeFn>(
             reinterpret_cast<void*>(GetProcAddress(ntdll, "NtResumeProcess")));
     }
+
+    ensureGpuCounter();
 }
 
-ProcessMonitor::~ProcessMonitor() = default;
+ProcessMonitor::~ProcessMonitor() {
+    if (m_gpuQuery) {
+        PdhCloseQuery(m_gpuQuery);
+        m_gpuQuery = nullptr;
+        m_gpuCounter = nullptr;
+        m_gpuReady = false;
+    }
+}
+
+void ProcessMonitor::ensureGpuCounter() {
+    if (m_gpuReady) {
+        return;
+    }
+
+    if (PdhOpenQueryW(nullptr, 0, &m_gpuQuery) != ERROR_SUCCESS) {
+        m_gpuQuery = nullptr;
+        return;
+    }
+
+    const PDH_STATUS addStatus = PdhAddEnglishCounterW(
+        m_gpuQuery,
+        L"\\GPU Engine(*)\\Utilization Percentage",
+        0,
+        &m_gpuCounter);
+
+    if (addStatus != ERROR_SUCCESS) {
+        PdhCloseQuery(m_gpuQuery);
+        m_gpuQuery = nullptr;
+        m_gpuCounter = nullptr;
+        return;
+    }
+
+    if (PdhCollectQueryData(m_gpuQuery) != ERROR_SUCCESS) {
+        PdhCloseQuery(m_gpuQuery);
+        m_gpuQuery = nullptr;
+        m_gpuCounter = nullptr;
+        return;
+    }
+
+    m_gpuReady = true;
+}
 
 void ProcessMonitor::setRefreshInterval(int ms) {
     m_timer->setInterval(qMax(250, ms));
@@ -137,6 +185,84 @@ ProcessCategory ProcessMonitor::categorize(const ProcessInfo&    pi,
 
 void ProcessMonitor::refresh() {
 
+    double gpuUsagePercent = 0.0;
+    QHash<quint32, double> gpuByPid;
+    if (!m_gpuReady) {
+        ensureGpuCounter();
+    }
+    if (m_gpuReady && m_gpuQuery && m_gpuCounter) {
+        if (PdhCollectQueryData(m_gpuQuery) == ERROR_SUCCESS) {
+            DWORD bufferSize = 0;
+            DWORD itemCount = 0;
+            DWORD status = static_cast<DWORD>(PdhGetFormattedCounterArrayW(
+                m_gpuCounter,
+                PDH_FMT_DOUBLE,
+                &bufferSize,
+                &itemCount,
+                nullptr));
+
+            if (status == static_cast<DWORD>(PDH_MORE_DATA)
+                && bufferSize > 0 && itemCount > 0) {
+                QByteArray buffer(static_cast<int>(bufferSize), 0);
+                auto* items = reinterpret_cast<PDH_FMT_COUNTERVALUE_ITEM_W*>(buffer.data());
+
+                status = static_cast<DWORD>(PdhGetFormattedCounterArrayW(
+                    m_gpuCounter,
+                    PDH_FMT_DOUBLE,
+                    &bufferSize,
+                    &itemCount,
+                    items));
+
+                if (status == ERROR_SUCCESS) {
+                    double total = 0.0;
+                    bool hadTotal = false;
+                    for (DWORD i = 0; i < itemCount; ++i) {
+                        const auto& item = items[i];
+                        if (item.FmtValue.CStatus != ERROR_SUCCESS) {
+                            continue;
+                        }
+
+                        const QString instanceName = QString::fromWCharArray(item.szName ? item.szName : L"");
+                        const double value = qMax(0.0, item.FmtValue.doubleValue);
+
+                        if (instanceName.compare(QStringLiteral("_Total"), Qt::CaseInsensitive) == 0) {
+                            total = value;
+                            hadTotal = true;
+                            continue;
+                        }
+
+                        const int pidMarker = instanceName.indexOf(QStringLiteral("pid_"), 0, Qt::CaseInsensitive);
+                        if (pidMarker >= 0) {
+                            const int begin = pidMarker + 4;
+                            int end = begin;
+                            while (end < instanceName.size() && instanceName.at(end).isDigit()) {
+                                ++end;
+                            }
+                            if (end > begin) {
+                                bool ok = false;
+                                const quint32 pid = instanceName.mid(begin, end - begin).toUInt(&ok);
+                                if (ok && pid > 0) {
+                                    gpuByPid[pid] = gpuByPid.value(pid, 0.0) + value;
+                                }
+                            }
+                        }
+
+                        total += value;
+                    }
+
+                    if (!hadTotal) {
+                        total = qMin(100.0, total);
+                    }
+                    gpuUsagePercent = qBound(0.0, total, 100.0);
+
+                    for (auto it = gpuByPid.begin(); it != gpuByPid.end(); ++it) {
+                        it.value() = qBound(0.0, it.value(), 100.0);
+                    }
+                }
+            }
+        }
+    }
+
     FILETIME ftIdle = {}, ftKernel = {}, ftUser = {};
     GetSystemTimes(&ftIdle, &ftKernel, &ftUser);
     const quint64 sysIdle   = ftToU64(ftIdle);
@@ -165,6 +291,7 @@ void ProcessMonitor::refresh() {
 
         SystemPerf sp;
         sp.cpuUsagePercent  = sysCpu;
+        sp.gpuUsagePercent  = gpuUsagePercent;
         sp.totalMemoryBytes = msx.ullTotalPhys;
         sp.availMemoryBytes = msx.ullAvailPhys;
         sp.usedMemoryBytes  = msx.ullTotalPhys - msx.ullAvailPhys;
@@ -202,6 +329,7 @@ void ProcessMonitor::refresh() {
                 pi.parentPid = static_cast<quint32>(pe.th32ParentProcessID);
                 pi.name      = QString::fromWCharArray(pe.szExeFile);
                 pi.threadCount = static_cast<quint32>(pe.cntThreads);
+                pi.gpuPercent = gpuByPid.value(pid, 0.0);
 
                 HANDLE hProc = OpenProcess(
                     PROCESS_QUERY_LIMITED_INFORMATION |
@@ -333,8 +461,49 @@ void ProcessMonitor::refresh() {
             return a.cpuPercent > b.cpuPercent;
         });
 
+    {
+        QHash<quint32, int> tcpByPid;
+        QHash<quint32, int> udpByPid;
+
+        DWORD tcpSize = 0;
+        GetExtendedTcpTable(nullptr, &tcpSize, FALSE, AF_INET,
+                            TCP_TABLE_OWNER_PID_ALL, 0);
+        if (tcpSize > 0) {
+            QByteArray tcpBuf(static_cast<int>(tcpSize), 0);
+            if (GetExtendedTcpTable(tcpBuf.data(), &tcpSize, FALSE, AF_INET,
+                                    TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR) {
+                auto* table = reinterpret_cast<MIB_TCPTABLE_OWNER_PID*>(tcpBuf.data());
+                for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+                    const quint32 pid = table->table[i].dwOwningPid;
+                    if (pid > 0) tcpByPid[pid]++;
+                }
+            }
+        }
+
+        DWORD udpSize = 0;
+        GetExtendedUdpTable(nullptr, &udpSize, FALSE, AF_INET,
+                            UDP_TABLE_OWNER_PID, 0);
+        if (udpSize > 0) {
+            QByteArray udpBuf(static_cast<int>(udpSize), 0);
+            if (GetExtendedUdpTable(udpBuf.data(), &udpSize, FALSE, AF_INET,
+                                    UDP_TABLE_OWNER_PID, 0) == NO_ERROR) {
+                auto* table = reinterpret_cast<MIB_UDPTABLE_OWNER_PID*>(udpBuf.data());
+                for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+                    const quint32 pid = table->table[i].dwOwningPid;
+                    if (pid > 0) udpByPid[pid]++;
+                }
+            }
+        }
+
+        for (auto& pi : result) {
+            pi.tcpConnections = tcpByPid.value(pi.pid, 0);
+            pi.udpEndpoints   = udpByPid.value(pi.pid, 0);
+        }
+    }
+
     SystemPerf sysPerf;
     sysPerf.cpuUsagePercent  = sysCpu;
+    sysPerf.gpuUsagePercent  = gpuUsagePercent;
     sysPerf.totalMemoryBytes = static_cast<quint64>(msx.ullTotalPhys);
     sysPerf.availMemoryBytes = static_cast<quint64>(msx.ullAvailPhys);
     sysPerf.usedMemoryBytes  = sysPerf.totalMemoryBytes - sysPerf.availMemoryBytes;
@@ -613,3 +782,35 @@ bool ProcessMonitor::setPriority(quint32 pid, int priorityClass) {
 }
 
 }
+
+#else
+
+namespace wintools::taskmanager {
+
+ProcessMonitor::ProcessMonitor(QObject* parent) : QObject(parent) {
+    m_timer = new QTimer(this);
+    connect(m_timer, &QTimer::timeout, this, &ProcessMonitor::refresh);
+    m_timer->setInterval(2000);
+}
+
+ProcessMonitor::~ProcessMonitor() {
+    stop();
+}
+
+void ProcessMonitor::setRefreshInterval(int ms) { m_timer->setInterval(ms); }
+void ProcessMonitor::start() { m_timer->start(); }
+void ProcessMonitor::stop()  { m_timer->stop(); }
+void ProcessMonitor::refresh() {
+
+    emit processesUpdated({}, {});
+}
+
+QString ProcessMonitor::endProcess(quint32) { return "Not supported on this platform"; }
+QString ProcessMonitor::endProcessTree(quint32) { return "Not supported on this platform"; }
+bool ProcessMonitor::suspendProcess(quint32) { return false; }
+bool ProcessMonitor::resumeProcess(quint32) { return false; }
+bool ProcessMonitor::setPriority(quint32, int) { return false; }
+
+}
+
+#endif

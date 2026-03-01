@@ -6,8 +6,6 @@
 
 #include <algorithm>
 
-// WinTools: monitors manages shared infrastructure.
-
 namespace wintools::display {
 
 namespace {

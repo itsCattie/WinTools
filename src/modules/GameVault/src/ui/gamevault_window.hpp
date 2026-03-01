@@ -1,7 +1,5 @@
 #pragma once
 
-// GameVault: gamevault window manages UI behavior and presentation.
-
 #include "modules/GameVault/src/core/game_entry.hpp"
 #include "common/themes/window_colour.hpp"
 
@@ -11,6 +9,7 @@
 #include <QPixmap>
 #include <QVector>
 
+class QComboBox;
 class QFrame;
 class QLabel;
 class QLineEdit;
@@ -31,6 +30,7 @@ namespace wintools::gamevault {
 class GameListModel;
 class GameFilterProxy;
 class GameCardDelegate;
+class SteamGridDBClient;
 
 class GameVaultWindow : public QDialog {
     Q_OBJECT
@@ -45,6 +45,7 @@ private slots:
     void onScanError(QString message);
     void onSearchChanged(const QString& text);
     void onSidebarItemClicked(int row);
+    void onSidebarContextMenu(const QPoint& pos);
     void onInstalledOnlyToggled(bool checked);
     void onGridActivated(const QModelIndex& idx);
     void onGridContextMenu(const QPoint& pos);
@@ -65,19 +66,24 @@ private:
     QWidget* buildDetailPage();
     void startScan();
     void updateSidebarCounts();
+    void updateFavouritesCount();
     void rebuildArtQueue();
     void fetchNextCardArt();
     void fetchDetailBanner(const QString& url);
+    void startSteamGridDbLookups();
     void setStatusText(const QString& text);
     void applyTheme(const wintools::themes::ThemePalette& palette);
+    void updateSidebarItemStyles();
 
     QListWidget*      m_sidebar         = nullptr;
     QListWidgetItem*  m_allGamesItem    = nullptr;
+    QListWidgetItem*  m_favouritesItem  = nullptr;
     QHash<int, QListWidgetItem*> m_platformItems;
     QPushButton*      m_installedToggle = nullptr;
     QPushButton*      m_settingsBtn     = nullptr;
 
     QLineEdit*        m_search          = nullptr;
+    QComboBox*        m_sortCombo       = nullptr;
     QPushButton*      m_rescanBtn       = nullptr;
     QLabel*           m_statusLabel     = nullptr;
     QListView*        m_gridView        = nullptr;
@@ -116,6 +122,11 @@ private:
 
     wintools::themes::ThemeListener* m_themeListener = nullptr;
     wintools::themes::ThemePalette   m_palette;
+
+    SteamGridDBClient*      m_sgdbClient    = nullptr;
+    QVector<QPair<int, QString>> m_sgdbQueue;
+    int                     m_sgdbIndex     = 0;
+    QHash<QString, int>     m_sgdbGameIds;
 };
 
 }

@@ -1,7 +1,5 @@
 #pragma once
 
-// GameVault: game model manages model/view data shaping.
-
 #include "modules/GameVault/src/core/game_entry.hpp"
 
 #include <QAbstractListModel>
@@ -55,21 +53,31 @@ class GameFilterProxy : public QSortFilterProxyModel {
     Q_OBJECT
 
 public:
+    enum SortMode { SortByName, SortByPlatform, SortByPlaytime, SortByLastPlayed, SortByRecentlyAdded };
+
     explicit GameFilterProxy(QObject* parent = nullptr);
 
     void setSearchText(const QString& text);
     void setPlatformFilter(GamePlatform platform);
     void clearPlatformFilter();
     void setInstalledOnly(bool installed);
+    void setFavouritesOnly(bool on);
+    void setTagFilter(const QString& tag);
+    void clearTagFilter();
+    void setSortMode(SortMode mode);
 
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override;
+    bool lessThan(const QModelIndex& left, const QModelIndex& right) const override;
 
 private:
     QString      m_search;
     GamePlatform m_platformFilter = GamePlatform::Unknown;
     bool         m_platformFilterActive = false;
     bool         m_installedOnly  = false;
+    bool         m_favouritesOnly = false;
+    QString      m_tagFilter;
+    SortMode     m_sortMode       = SortByName;
 };
 
 }

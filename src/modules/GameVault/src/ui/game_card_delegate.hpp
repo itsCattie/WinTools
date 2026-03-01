@@ -1,7 +1,5 @@
 #pragma once
 
-// GameVault: game card delegate manages UI behavior and presentation.
-
 #include <QAbstractItemDelegate>
 #include <QHash>
 #include <QPixmap>

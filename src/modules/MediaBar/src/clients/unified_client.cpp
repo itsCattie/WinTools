@@ -2,8 +2,6 @@
 
 #include "debug_logger.hpp"
 
-// MediaBar: unified client manages service client integration.
-
 UnifiedMusicClient::UnifiedMusicClient() = default;
 
 #ifdef MEDIABAR_ENABLE_TEST_HOOKS
@@ -50,30 +48,23 @@ void UnifiedMusicClient::testResetCallCounts() {
 void UnifiedMusicClient::setSourceMode(SourceMode mode) {
     sourceMode_ = mode;
     debuglog::info("UnifiedClient", QString("setSourceMode=%1")
-        .arg(mode == SourceMode::Spotify ? "spotify" : mode == SourceMode::Sonos ? "sonos" : "auto"));
+        .arg(mode == SourceMode::Spotify ? "spotify" : "sonos"));
 }
 
 void UnifiedMusicClient::setSourceModeFromString(const QString& mode) {
     const QString normalized = mode.trimmed().toLower();
-    if (normalized == "spotify") {
-        setSourceMode(SourceMode::Spotify);
-        return;
-    }
     if (normalized == "sonos") {
         setSourceMode(SourceMode::Sonos);
         return;
     }
-    setSourceMode(SourceMode::Auto);
+    setSourceMode(SourceMode::Spotify);
 }
 
 QString UnifiedMusicClient::sourceModeToString() const {
-    if (sourceMode_ == SourceMode::Spotify) {
-        return "spotify";
-    }
     if (sourceMode_ == SourceMode::Sonos) {
         return "sonos";
     }
-    return "auto";
+    return "spotify";
 }
 
 std::optional<PlaybackInfo> UnifiedMusicClient::getSpotifyPlayback() {
@@ -106,6 +97,11 @@ std::optional<PlaybackInfo> UnifiedMusicClient::getSonosPlayback() {
     auto playback = sonos_.getCurrentPlayback();
     if (playback.has_value()) {
         currentSource_ = "sonos";
+
+        const auto vol = sonos_.getVolume();
+        if (vol.has_value()) {
+            playback->volumePercent = vol.value();
+        }
     }
     return playback;
 }
@@ -113,31 +109,11 @@ std::optional<PlaybackInfo> UnifiedMusicClient::getSonosPlayback() {
 std::optional<PlaybackInfo> UnifiedMusicClient::getCurrentPlayback() {
     debuglog::trace("UnifiedClient", QString("getCurrentPlayback mode=%1")
         .arg(sourceModeToString()));
-    if (sourceMode_ == SourceMode::Spotify) {
-        return getSpotifyPlayback();
-    }
-
     if (sourceMode_ == SourceMode::Sonos) {
         return getSonosPlayback();
     }
 
-    auto spotify = getSpotifyPlayback();
-    if (spotify.has_value() && spotify->isPlaying) {
-        return spotify;
-    }
-
-    auto sonos = getSonosPlayback();
-    if (sonos.has_value() && sonos->isPlaying) {
-        return sonos;
-    }
-
-    if (spotify.has_value()) {
-        debuglog::trace("UnifiedClient", "Returning spotify fallback playback.");
-        return spotify;
-    }
-    debuglog::trace("UnifiedClient", QString("Returning sonos fallback playback=%1")
-        .arg(sonos.has_value() ? "1" : "0"));
-    return sonos;
+    return getSpotifyPlayback();
 }
 
 QString UnifiedMusicClient::getSourceName() const {
@@ -265,6 +241,31 @@ bool UnifiedMusicClient::seekToPosition(qint64 positionMs) {
     return spotify_.seekToPosition(positionMs) || sonos_.seekToPosition(positionMs);
 }
 
+std::optional<int> UnifiedMusicClient::getVolumePercent() {
+    if (currentSource_ == "spotify") {
+        return spotify_.getVolumePercent();
+    }
+    if (currentSource_ == "sonos") {
+        return sonos_.getVolume();
+    }
+
+    const auto spotifyVolume = spotify_.getVolumePercent();
+    if (spotifyVolume.has_value()) {
+        return spotifyVolume;
+    }
+    return sonos_.getVolume();
+}
+
+bool UnifiedMusicClient::setVolumePercent(int percent) {
+    if (currentSource_ == "spotify") {
+        return spotify_.setVolumePercent(percent);
+    }
+    if (currentSource_ == "sonos") {
+        return sonos_.setVolume(percent);
+    }
+    return spotify_.setVolumePercent(percent);
+}
+
 std::optional<bool> UnifiedMusicClient::getShuffleState() {
 #ifdef MEDIABAR_ENABLE_TEST_HOOKS
     if (testHooksEnabled_) {
@@ -318,5 +319,19 @@ std::optional<bool> UnifiedMusicClient::toggleShuffle() {
             return nextState;
         }
     }
+    return std::nullopt;
+}
+
+std::optional<bool> UnifiedMusicClient::setRepeatState(bool enabled) {
+#ifdef MEDIABAR_ENABLE_TEST_HOOKS
+
+#endif
+    if (currentSource_ == "spotify" || currentSource_.isEmpty()) {
+        if (spotify_.setRepeatState(enabled)) {
+            return enabled;
+        }
+        return std::nullopt;
+    }
+
     return std::nullopt;
 }

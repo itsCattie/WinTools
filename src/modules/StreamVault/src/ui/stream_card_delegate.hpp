@@ -1,11 +1,11 @@
 #pragma once
 
-// StreamVault: stream card delegate manages UI behavior and presentation.
-
 #include <QAbstractItemDelegate>
 #include <QHash>
 #include <QPixmap>
 #include <QString>
+
+#include "common/themes/window_colour.hpp"
 
 namespace wintools::streamvault {
 
@@ -22,6 +22,7 @@ public:
     explicit StreamCardDelegate(QObject* parent = nullptr);
 
     void setPosterCache(const QHash<int, QPixmap>* cache) { m_posterCache = cache; }
+    void setThemePalette(const wintools::themes::ThemePalette& palette) { m_palette = palette; }
 
     QSize sizeHint(const QStyleOptionViewItem& option,
                    const QModelIndex&           index) const override;
@@ -32,8 +33,9 @@ public:
 
 private:
     const QHash<int, QPixmap>* m_posterCache = nullptr;
+    wintools::themes::ThemePalette m_palette;
 
-    static void drawPlaceholder(QPainter* p, const QRect& artRect, const QString& title);
+    void drawPlaceholder(QPainter* p, const QRect& artRect, const QString& title) const;
 };
 
 }

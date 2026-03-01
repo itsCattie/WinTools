@@ -1,11 +1,10 @@
 #include "modules/disksentinel/src/ui/treemap_widget.hpp"
+#include "common/themes/theme_helper.hpp"
 
 #include <QPainter>
 #include <QMouseEvent>
 #include <QToolTip>
 #include <algorithm>
-
-// DiskSentinel: treemap widget manages UI behavior and presentation.
 
 namespace wintools::disksentinel {
 
@@ -23,15 +22,15 @@ static const QHash<QString, QColor>& categoryColours() {
     return map;
 }
 
-static const QVector<QColor>& dirColours() {
+QColor categoryColor(const QString& category) {
+    return categoryColours().value(category, QColor(0x7f, 0x8c, 0x8d));
+}
 
-    static const QVector<QColor> pal{
-        QColor(0x2c, 0x3e, 0x50),
-        QColor(0x34, 0x49, 0x5e),
-        QColor(0x3d, 0x55, 0x6e),
-        QColor(0x46, 0x62, 0x7e),
-    };
-    return pal;
+QColor blend(const QColor& a, const QColor& b, float alpha) {
+    return QColor(
+        static_cast<int>(a.red() * (1.0f - alpha) + b.red() * alpha),
+        static_cast<int>(a.green() * (1.0f - alpha) + b.green() * alpha),
+        static_cast<int>(a.blue() * (1.0f - alpha) + b.blue() * alpha));
 }
 
 TreemapWidget::TreemapWidget(QWidget* parent)
@@ -61,6 +60,7 @@ void TreemapWidget::paintEvent(QPaintEvent*) {
     p.fillRect(rect(), palette().window());
 
     m_cells.clear();
+    m_cells.reserve(4096);
 
     if (!m_root || m_root->size == 0) {
         p.setPen(palette().placeholderText().color());
@@ -69,14 +69,23 @@ void TreemapWidget::paintEvent(QPaintEvent*) {
         return;
     }
 
-    renderRoot(p);
+    const auto theme = wintools::themes::ThemeHelper::currentPalette();
+    const bool darkTheme = wintools::themes::ThemeHelper::isDarkTheme();
+    renderRoot(p, theme, darkTheme);
 }
 
 void TreemapWidget::mouseMoveEvent(QMouseEvent* event) {
     DiskNode* hit = hitTest(event->position());
     if (hit != m_hovered) {
+        const QRectF oldRect = nodeRect(m_hovered);
+        const QRectF newRect = nodeRect(hit);
         m_hovered = hit;
-        update();
+        if (oldRect.isValid()) {
+            update(oldRect.toAlignedRect().adjusted(-2, -2, 2, 2));
+        }
+        if (newRect.isValid()) {
+            update(newRect.toAlignedRect().adjusted(-2, -2, 2, 2));
+        }
         emit nodeHovered(hit);
     }
     if (hit) {
@@ -108,31 +117,32 @@ void TreemapWidget::leaveEvent(QEvent* event) {
     QWidget::leaveEvent(event);
 }
 
-void TreemapWidget::renderRoot(QPainter& p) {
+void TreemapWidget::renderRoot(QPainter& p,
+                               const wintools::themes::ThemePalette& theme,
+                               bool darkTheme) {
 
     QVector<DiskNode*> children;
     children.reserve(static_cast<int>(m_root->children.size()));
     for (const auto& c : m_root->children)
         children.push_back(c.get());
 
-    std::sort(children.begin(), children.end(),
-        [](DiskNode* a, DiskNode* b) { return a->size > b->size; });
-
     qint64 total = 0;
     for (auto* c : children) total += c->size;
     if (total == 0) return;
 
-    layoutItems(p, QRectF(rect()), children, total, 0);
+    layoutItems(p, QRectF(rect()), children, total, 0, theme, darkTheme);
 }
 
 void TreemapWidget::layoutItems(QPainter& p, QRectF rect,
                                  const QVector<DiskNode*>& items,
-                                 qint64 total, int depth) {
+                                 qint64 total, int depth,
+                                 const wintools::themes::ThemePalette& theme,
+                                 bool darkTheme) {
     if (items.isEmpty() || total == 0 || rect.width() < 2 || rect.height() < 2)
         return;
 
     if (items.size() == 1) {
-        drawNode(p, rect, items[0], depth);
+        drawNode(p, rect, items[0], depth, theme, darkTheme);
         return;
     }
 
@@ -163,13 +173,15 @@ void TreemapWidget::layoutItems(QPainter& p, QRectF rect,
         rightRect = {rect.x(), rect.y() + h,     rect.width(), rect.height()-h};
     }
 
-    layoutItems(p, leftRect,  left,  leftTotal,  depth);
-    layoutItems(p, rightRect, right, rightTotal, depth);
+    layoutItems(p, leftRect,  left,  leftTotal,  depth, theme, darkTheme);
+    layoutItems(p, rightRect, right, rightTotal, depth, theme, darkTheme);
 }
 
 void TreemapWidget::drawNode(QPainter& p, QRectF rect,
-                              DiskNode* node, int depth) {
-    const QColor bg = colorForNode(node, depth);
+                              DiskNode* node, int depth,
+                              const wintools::themes::ThemePalette& theme,
+                              bool darkTheme) {
+    const QColor bg = colorForNode(node, depth, theme, darkTheme);
 
     const bool canRecurse = node->isDir
                          && !node->children.empty()
@@ -177,7 +189,9 @@ void TreemapWidget::drawNode(QPainter& p, QRectF rect,
                          && rect.height() > 40;
 
     const bool hovered = (node == m_hovered);
-    const QColor fill = hovered ? bg.lighter(160) : bg;
+    const QColor fill = hovered
+        ? (darkTheme ? bg.lighter(130) : bg.darker(108))
+        : bg;
 
     if (canRecurse) {
 
@@ -186,10 +200,11 @@ void TreemapWidget::drawNode(QPainter& p, QRectF rect,
 
         p.fillRect(rect.toRect(), fill);
 
+        QColor borderColor = darkTheme ? fill.darker(152) : fill.darker(125);
         if (hovered) {
-            p.setPen(QPen(QColor(0x00, 0x78, 0xd4), 2));
+            p.setPen(QPen(theme.accent, 2));
         } else {
-            p.setPen(QPen(fill.darker(170), 1.5));
+            p.setPen(QPen(borderColor, 1.5));
         }
         p.drawRect(rect.adjusted(0, 0, -1, -1));
 
@@ -198,7 +213,8 @@ void TreemapWidget::drawNode(QPainter& p, QRectF rect,
             f.setPixelSize(10);
             f.setBold(true);
             p.setFont(f);
-            p.setPen(fill.lighter(230));
+            QColor titleColor = fill.lightness() > 150 ? QColor(0x1f, 0x1f, 0x1f) : QColor(Qt::white);
+            p.setPen(titleColor);
             p.drawText(QRectF(rect.x() + pad + 2, rect.y() + 1,
                               rect.width() - pad * 2, headerH - 1),
                         Qt::AlignLeft | Qt::AlignVCenter,
@@ -211,23 +227,22 @@ void TreemapWidget::drawNode(QPainter& p, QRectF rect,
         kids.reserve(static_cast<int>(node->children.size()));
         for (const auto& c : node->children)
             kids.push_back(c.get());
-        std::sort(kids.begin(), kids.end(),
-            [](DiskNode* a, DiskNode* b) { return a->size > b->size; });
 
         qint64 kidsTotal = 0;
         for (auto* k : kids) kidsTotal += k->size;
 
         if (kidsTotal > 0)
-            layoutItems(p, inner, kids, kidsTotal, depth + 1);
+            layoutItems(p, inner, kids, kidsTotal, depth + 1, theme, darkTheme);
 
     } else {
 
         p.fillRect(rect.toRect(), fill);
 
+        QColor borderColor = darkTheme ? fill.darker(145) : fill.darker(120);
         if (hovered) {
-            p.setPen(QPen(QColor(0x00, 0x78, 0xd4), 2));
+            p.setPen(QPen(theme.accent, 2));
         } else {
-            p.setPen(QPen(fill.darker(160), 1));
+            p.setPen(QPen(borderColor, 1));
         }
         p.drawRect(rect.adjusted(0, 0, -1, -1));
 
@@ -247,16 +262,29 @@ void TreemapWidget::drawNode(QPainter& p, QRectF rect,
         }
     }
 
-    m_cells.append({rect, node});
+    m_cells.append({rect, node, depth});
 }
 
-QColor TreemapWidget::colorForNode(DiskNode* node, int depth) {
+QColor TreemapWidget::colorForNode(DiskNode* node, int depth,
+                                   const wintools::themes::ThemePalette& theme,
+                                   bool darkTheme) {
+
     if (node->isDir) {
-        const auto& pal = dirColours();
-        return pal[qMin(depth, pal.size() - 1)];
+        const QColor from = darkTheme
+            ? blend(theme.cardBackground, theme.windowBackground, 0.55f)
+            : blend(theme.cardBackground, theme.windowBackground, 0.18f);
+        const QColor to = darkTheme
+            ? blend(theme.accent, theme.windowBackground, 0.55f)
+            : blend(theme.accent, theme.cardBackground, 0.22f);
+        const float t = qBound(0.0f, static_cast<float>(depth) / 5.0f, 1.0f);
+        return blend(from, to, t);
     }
     const QString cat = DiskNode::category(node->name);
-    return categoryColours().value(cat, QColor(0x7f, 0x8c, 0x8d));
+    QColor c = categoryColor(cat);
+    if (darkTheme) {
+        return blend(c, theme.windowBackground, 0.08f);
+    }
+    return blend(c, theme.windowBackground, 0.30f);
 }
 
 DiskNode* TreemapWidget::hitTest(const QPointF& pos) const {
@@ -266,6 +294,16 @@ DiskNode* TreemapWidget::hitTest(const QPointF& pos) const {
             return m_cells[i].node;
     }
     return nullptr;
+}
+
+QRectF TreemapWidget::nodeRect(DiskNode* node) const {
+    if (!node) return {};
+    for (int i = m_cells.size() - 1; i >= 0; --i) {
+        if (m_cells[i].node == node) {
+            return m_cells[i].rect;
+        }
+    }
+    return {};
 }
 
 }

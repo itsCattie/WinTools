@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <cmath>
 
-// WinTools: dpi utils manages shared infrastructure.
-
 namespace wintools::display {
 
 namespace {

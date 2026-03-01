@@ -9,8 +9,6 @@
 #include <QStringList>
 #include <QTextStream>
 
-// WinTools: console manager manages UI behavior and presentation.
-
 #ifdef _WIN32
 #include <windows.h>
 #include <vector>
@@ -26,6 +24,7 @@ bool isPidRunning(qint64 pid) {
         return false;
     }
 
+#ifdef _WIN32
     QProcess checker;
     QStringList args;
     args << "/FI" << QString("PID eq %1").arg(pid);
@@ -40,6 +39,10 @@ bool isPidRunning(qint64 pid) {
     }
 
     return output.contains(QString::number(pid));
+#else
+
+    return QFile::exists(QString("/proc/%1").arg(pid));
+#endif
 }
 
 QString logScriptPath() {
@@ -75,12 +78,21 @@ bool writeLogViewerScript(const QString& logPath) {
 }
 
 QString powershellPath() {
+#ifdef _WIN32
     const QString resolved = QStandardPaths::findExecutable("powershell.exe");
     if (!resolved.isEmpty()) {
         return resolved;
     }
 
     return "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+#elif defined(Q_OS_MACOS)
+    const QString resolved = QStandardPaths::findExecutable("pwsh");
+    return resolved.isEmpty() ? QStringLiteral("/usr/local/bin/pwsh") : resolved;
+#else
+
+    const QString resolved = QStandardPaths::findExecutable("pwsh");
+    return resolved.isEmpty() ? QStringLiteral("bash") : resolved;
+#endif
 }
 
 bool closeLogWindowByPid(qint64 pid) {
@@ -88,10 +100,17 @@ bool closeLogWindowByPid(qint64 pid) {
         return false;
     }
 
+#ifdef _WIN32
     QStringList args;
     args << "/PID" << QString::number(pid) << "/T" << "/F";
     const int code = QProcess::execute("taskkill", args);
     return code == 0;
+#else
+    QStringList args;
+    args << "-9" << QString::number(pid);
+    const int code = QProcess::execute("kill", args);
+    return code == 0;
+#endif
 }
 
 bool openLogWindow(const QString& logPath, qint64* pid) {

@@ -12,8 +12,6 @@
 #include <QStandardPaths>
 #include <QTextStream>
 
-// GameVault: emulator scanners manages discovery and scanning flow.
-
 namespace wintools::gamevault {
 
 namespace {
@@ -79,12 +77,27 @@ QString Rpcs3Scanner::findRpcs3DataDir() const {
     const QString candidate = QFileInfo(appData).absolutePath() + "/rpcs3";
     if (QDir(candidate + "/dev_hdd0/game").exists()) return candidate;
 
+#ifdef Q_OS_WIN
     const QStringList rpcs3Paths = {
         QStringLiteral("C:/rpcs3"),
         QStringLiteral("C:/Emulators/rpcs3"),
         QStringLiteral("D:/rpcs3"),
         QStringLiteral("E:/rpcs3")
     };
+#elif defined(Q_OS_MACOS)
+    const QStringList rpcs3Paths = {
+        QDir::homePath() + "/Library/Application Support/rpcs3",
+        QStringLiteral("/Applications/rpcs3.app/Contents/MacOS")
+    };
+#elif defined(Q_OS_LINUX)
+    const QStringList rpcs3Paths = {
+        QDir::homePath() + "/rpcs3",
+        QDir::homePath() + "/.config/rpcs3",
+        QDir::homePath() + "/.var/app/net.rpcs3.RPCS3/config/rpcs3"
+    };
+#else
+    const QStringList rpcs3Paths;
+#endif
     for (const QString& p : rpcs3Paths) {
         if (QDir(p + "/dev_hdd0/game").exists()) return p;
     }
@@ -104,10 +117,18 @@ QVector<GameEntry> Rpcs3Scanner::scan() const {
     if (dataDir.isEmpty()) return results;
 
     QString rpcs3Exe;
+#ifdef Q_OS_WIN
     for (const QString& p : { dataDir + "/rpcs3.exe",
                                dataDir + "/../rpcs3.exe" }) {
         if (QFile::exists(p)) { rpcs3Exe = QFileInfo(p).absoluteFilePath(); break; }
     }
+#else
+    for (const QString& p : { dataDir + "/rpcs3",
+                               dataDir + "/../rpcs3",
+                               QStringLiteral("/usr/bin/rpcs3") }) {
+        if (QFile::exists(p)) { rpcs3Exe = QFileInfo(p).absoluteFilePath(); break; }
+    }
+#endif
 
     const QString gameRoot = dataDir + "/dev_hdd0/game";
     QDirIterator it(gameRoot, QDir::Dirs | QDir::NoDotAndDotDot);
@@ -135,11 +156,24 @@ QVector<GameEntry> Rpcs3Scanner::scan() const {
 }
 
 QString YuzuScanner::findYuzuExe() const {
+#ifdef Q_OS_WIN
     const QStringList yuzuPaths = {
         QStringLiteral("C:/yuzu/yuzu.exe"),
         QStringLiteral("C:/Emulators/yuzu/yuzu.exe"),
         qEnvironmentVariable("LOCALAPPDATA") + "/yuzu/yuzu-windows-msvc/yuzu.exe"
     };
+#elif defined(Q_OS_MACOS)
+    const QStringList yuzuPaths = {
+        QStringLiteral("/Applications/yuzu.app/Contents/MacOS/yuzu")
+    };
+#elif defined(Q_OS_LINUX)
+    const QStringList yuzuPaths = {
+        QStringLiteral("/usr/bin/yuzu"),
+        QDir::homePath() + "/.local/share/yuzu/yuzu"
+    };
+#else
+    const QStringList yuzuPaths;
+#endif
     for (const QString& p : yuzuPaths) {
         if (QFile::exists(p)) return QDir::fromNativeSeparators(p);
     }
@@ -149,8 +183,14 @@ QString YuzuScanner::findYuzuExe() const {
 QVector<GameEntry> YuzuScanner::scan() const {
     QVector<GameEntry> results;
 
+#ifdef Q_OS_WIN
     const QString cacheDir =
         QDir::fromNativeSeparators(qEnvironmentVariable("APPDATA")) + "/yuzu/cache/game_list";
+#elif defined(Q_OS_MACOS)
+    const QString cacheDir = QDir::homePath() + "/Library/Application Support/yuzu/cache/game_list";
+#else
+    const QString cacheDir = QDir::homePath() + "/.local/share/yuzu/cache/game_list";
+#endif
     if (!QDir(cacheDir).exists()) return results;
 
     const QString yuzuExe = findYuzuExe();
@@ -185,11 +225,24 @@ QVector<GameEntry> YuzuScanner::scan() const {
 }
 
 QString RyujinxScanner::findRyujinxExe() const {
+#ifdef Q_OS_WIN
     const QStringList ryujinxPaths = {
         QStringLiteral("C:/Ryujinx/Ryujinx.exe"),
         QStringLiteral("C:/Emulators/Ryujinx/Ryujinx.exe"),
         qEnvironmentVariable("LOCALAPPDATA") + "/Ryujinx/publish/Ryujinx.exe"
     };
+#elif defined(Q_OS_MACOS)
+    const QStringList ryujinxPaths = {
+        QStringLiteral("/Applications/Ryujinx.app/Contents/MacOS/Ryujinx")
+    };
+#elif defined(Q_OS_LINUX)
+    const QStringList ryujinxPaths = {
+        QStringLiteral("/usr/bin/Ryujinx"),
+        QDir::homePath() + "/.config/Ryujinx/Ryujinx"
+    };
+#else
+    const QStringList ryujinxPaths;
+#endif
     for (const QString& p : ryujinxPaths) {
         if (QFile::exists(p)) return QDir::fromNativeSeparators(p);
     }
@@ -199,8 +252,14 @@ QString RyujinxScanner::findRyujinxExe() const {
 QVector<GameEntry> RyujinxScanner::scan() const {
     QVector<GameEntry> results;
 
+#ifdef Q_OS_WIN
     const QString gamesDir =
         QDir::fromNativeSeparators(qEnvironmentVariable("APPDATA")) + "/Ryujinx/games";
+#elif defined(Q_OS_MACOS)
+    const QString gamesDir = QDir::homePath() + "/Library/Application Support/Ryujinx/games";
+#else
+    const QString gamesDir = QDir::homePath() + "/.config/Ryujinx/games";
+#endif
     if (!QDir(gamesDir).exists()) return results;
 
     const QString ryujinxExe = findRyujinxExe();
@@ -229,11 +288,25 @@ QVector<GameEntry> RyujinxScanner::scan() const {
 }
 
 QString DolphinScanner::findDolphinExe() const {
+#ifdef Q_OS_WIN
     const QStringList dolphinPaths = {
         QStringLiteral("C:/Dolphin/Dolphin.exe"),
         QStringLiteral("C:/Emulators/Dolphin/Dolphin.exe"),
         qEnvironmentVariable("LOCALAPPDATA") + "/Dolphin/Dolphin.exe"
     };
+#elif defined(Q_OS_MACOS)
+    const QStringList dolphinPaths = {
+        QStringLiteral("/Applications/Dolphin.app/Contents/MacOS/Dolphin"),
+        QDir::homePath() + "/Library/Application Support/Dolphin/dolphin-emu"
+    };
+#elif defined(Q_OS_LINUX)
+    const QStringList dolphinPaths = {
+        QStringLiteral("/usr/bin/dolphin-emu"),
+        QDir::homePath() + "/.var/app/org.DolphinEmu.dolphin-emu/dolphin-emu"
+    };
+#else
+    const QStringList dolphinPaths;
+#endif
     for (const QString& p : dolphinPaths) {
         if (QFile::exists(p)) return QDir::fromNativeSeparators(p);
     }
@@ -242,9 +315,17 @@ QString DolphinScanner::findDolphinExe() const {
 
 QStringList DolphinScanner::readIsoPaths() const {
     QStringList paths;
+#ifdef Q_OS_WIN
     const QString cfgPath =
         QDir::fromNativeSeparators(qEnvironmentVariable("APPDATA"))
         + "/Dolphin Emulator/Config/Dolphin.ini";
+#elif defined(Q_OS_MACOS)
+    const QString cfgPath = QDir::homePath()
+        + "/Library/Application Support/Dolphin/Config/Dolphin.ini";
+#else
+    const QString cfgPath = QDir::homePath()
+        + "/.config/dolphin-emu/Dolphin.ini";
+#endif
 
     QFile f(cfgPath);
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return paths;
@@ -271,7 +352,16 @@ QStringList DolphinScanner::readIsoPaths() const {
 QVector<GameEntry> DolphinScanner::scan() const {
     QVector<GameEntry> results;
 
-    const QStringList isoPaths = readIsoPaths();
+    QStringList isoPaths = readIsoPaths();
+
+    if (isoPaths.isEmpty()) {
+        const QStringList customFolders = GameVaultSettings::instance().customGameFolders();
+        for (const QString& f : customFolders) {
+            if (f.isEmpty()) continue;
+            const QString dir = QDir::fromNativeSeparators(f);
+            if (QDir(dir).exists() && !isoPaths.contains(dir)) isoPaths << dir;
+        }
+    }
     if (isoPaths.isEmpty()) return results;
 
     const QString dolphinExe = findDolphinExe();
@@ -299,6 +389,7 @@ QVector<GameEntry> DolphinScanner::scan() const {
 
 QString DeSmuMEScanner::findDeSmuMEExe() const {
 
+#ifdef Q_OS_WIN
     const QStringList appPathKeys = {
         QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\DeSmuME.exe"),
         QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\DeSmuME.exe"),
@@ -336,6 +427,20 @@ QString DeSmuMEScanner::findDeSmuMEExe() const {
         const QString found = findExeByNameContains(QDir::fromNativeSeparators(root), "desmume", 4);
         if (!found.isEmpty()) return found;
     }
+#elif defined(Q_OS_MACOS)
+    const QStringList candidates = {
+        QStringLiteral("/Applications/DeSmuME.app/Contents/MacOS/DeSmuME")
+    };
+    for (const QString& p : candidates)
+        if (QFile::exists(p)) return p;
+#elif defined(Q_OS_LINUX)
+    const QStringList candidates = {
+        QStringLiteral("/usr/bin/desmume"),
+        QDir::homePath() + "/.config/desmume/desmume"
+    };
+    for (const QString& p : candidates)
+        if (QFile::exists(p)) return p;
+#endif
 
     return {};
 }
@@ -343,6 +448,7 @@ QString DeSmuMEScanner::findDeSmuMEExe() const {
 QStringList DeSmuMEScanner::recentRomPaths() const {
 
     QStringList paths;
+#ifdef Q_OS_WIN
     QSettings root(QStringLiteral("HKEY_CURRENT_USER\\Software\\DeSmuME"),
                    QSettings::NativeFormat);
     const QStringList versions = root.childGroups();
@@ -359,10 +465,12 @@ QStringList DeSmuMEScanner::recentRomPaths() const {
                 paths << p;
         }
     }
+#endif
     return paths;
 }
 
 QString DeSmuMEScanner::lastRomDir() const {
+#ifdef Q_OS_WIN
     QSettings root(QStringLiteral("HKEY_CURRENT_USER\\Software\\DeSmuME"),
                    QSettings::NativeFormat);
     for (const QString& ver : root.childGroups()) {
@@ -372,6 +480,7 @@ QString DeSmuMEScanner::lastRomDir() const {
         const QString dir = QDir::fromNativeSeparators(s.value("LastRomDir").toString());
         if (!dir.isEmpty() && QDir(dir).exists()) return dir;
     }
+#endif
     return {};
 }
 

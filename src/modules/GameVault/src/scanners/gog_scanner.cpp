@@ -9,17 +9,27 @@
 #include <QStandardPaths>
 #include <QVariant>
 
-// GameVault: gog scanner manages discovery and scanning flow.
-
 namespace wintools::gamevault {
 
 namespace {
 
 QString findGogDb() {
+#ifdef Q_OS_WIN
     const QString programData =
         QDir::fromNativeSeparators(qEnvironmentVariable("ProgramData", "C:/ProgramData"));
     const QString db = programData + "/GOG.com/Galaxy/storage/galaxy-2.0.db";
     return QFile::exists(db) ? db : QString();
+#elif defined(Q_OS_MACOS)
+    const QString db = QDir::homePath()
+        + "/Library/Application Support/GOG.com/Galaxy/storage/galaxy-2.0.db";
+    return QFile::exists(db) ? db : QString();
+#elif defined(Q_OS_LINUX)
+
+    const QString db = QDir::homePath() + "/.local/share/gog/galaxy-2.0.db";
+    return QFile::exists(db) ? db : QString();
+#else
+    return {};
+#endif
 }
 
 }

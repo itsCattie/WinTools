@@ -14,6 +14,7 @@ A multi-service streaming hub for WinTools that lets you search for movies and T
 | **One-click redirect** | Clicking a service button searches that service's website for the title in your browser. |
 | **Quick login** | Clicking a service name in the sidebar opens its login page. |
 | **Sidebar open button** | Click `→` next to a service name to go straight to its homepage. |
+| **Custom services** | Add your own services (for NAS/self-hosted libraries, etc.) from Settings with custom search/home/login URLs. |
 | **Filter bar** | Filter results by All / Movies / TV Shows. |
 | **Poster & backdrop art** | Images are downloaded asynchronously and cached for the session. |
 | **Availability cache** | Provider data for each title is cached so revisiting the detail page doesn't re-fetch. |
@@ -26,7 +27,10 @@ A multi-service streaming hub for WinTools that lets you search for movies and T
 2. **Enter the key in StreamVault**  
    Open StreamVault → click **⚙ Settings** → paste your key and click **OK**.
 
-3. **Start searching**  
+3. **(Optional) Add custom services**  
+   In **⚙ Settings**, add custom services using a search URL template containing `%1` (the title placeholder), for example: `https://my-nas.local/search?q=%1`.
+
+4. **Start searching**  
    Type a title in the search bar and press Enter (or wait 400 ms for auto-search). Double-click any result card to open the detail page and choose a service.
 
 ## Supported Services
@@ -51,5 +55,5 @@ A multi-service streaming hub for WinTools that lets you search for movies and T
 - This module **does not** handle DRM, streaming playback, or account credentials. All logins and playback happen in the user's default web browser.
 - Availability data comes from TMDB's watch-provider endpoint (sourced from JustWatch). It reflects subscription/flatrate services only — rent and purchase options are not shown.
 - Provider availability is **per-country**. The country dropdown is populated only with countries where the title can be streamed via subscription. If no subscription options exist for any country, a "No streaming availability data found" message is shown instead.
-- The context menu (right-click on a result card) provides quick *Search on …* entries for all 12 known services regardless of availability, as a manual fallback.
+- The context menu (right-click on a result card) provides quick *Search on …* entries for known and custom services regardless of availability, as a manual fallback.
 - TMDB provider IDs are mapped to known services; any provider not in the map is shown as a disabled label with its name.

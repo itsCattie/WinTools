@@ -10,8 +10,6 @@
 #include <QToolTip>
 #include <QtMath>
 
-// AdvancedTaskManager: perf graph widget manages UI behavior and presentation.
-
 namespace wintools::taskmanager {
 
 PerfGraphWidget::PerfGraphWidget(QWidget* parent)
@@ -29,6 +27,9 @@ void PerfGraphWidget::setTitle(const QString& title)     { m_title = title; upda
 void PerfGraphWidget::setMaxValue(double v)              { m_maxValue = v;  update(); }
 void PerfGraphWidget::setGridColor(const QColor& c)      { m_gridColor = c; update(); }
 void PerfGraphWidget::setBackground(const QColor& c)     { m_background = c; update(); }
+void PerfGraphWidget::setTextColor(const QColor& c)      { m_textColor = c; update(); }
+void PerfGraphWidget::setSubtleTextColor(const QColor& c){ m_subtleTextColor = c; update(); }
+void PerfGraphWidget::setCrosshairColor(const QColor& c) { m_crosshairColor = c; update(); }
 
 void PerfGraphWidget::setLineColor(const QColor& c) {
     m_lineColor = c;
@@ -185,7 +186,7 @@ void PerfGraphWidget::drawCurve(QPainter& p, const QRect& r) const {
 }
 
 void PerfGraphWidget::drawLabels(QPainter& p, const QRect& r) const {
-    p.setPen(QPen(QColor(0xCC, 0xCC, 0xCC)));
+    p.setPen(QPen(m_textColor));
     QFont f = p.font();
     f.setPixelSize(11);
     p.setFont(f);
@@ -205,7 +206,7 @@ void PerfGraphWidget::drawLabels(QPainter& p, const QRect& r) const {
 
     f.setPixelSize(9);
     p.setFont(f);
-    p.setPen(QPen(QColor(0x88, 0x88, 0x88)));
+    p.setPen(QPen(m_subtleTextColor));
     p.drawText(r.left(), r.bottom() + 14, QStringLiteral("0"));
     if (m_valueFormat == ValueFormat::BytesPerSec) {
         p.drawText(r.left(), r.top() + 9, formatByteRateShort(m_maxValue));
@@ -278,7 +279,7 @@ void PerfGraphWidget::drawCrosshair(QPainter& p, const QRect& r) const {
     double xStep = static_cast<double>(r.width()) / (n - 1);
     int cx = r.left() + static_cast<int>(m_hoveredSample * xStep);
 
-    p.setPen(QPen(QColor(255, 255, 255, 80), 1, Qt::DashLine));
+    p.setPen(QPen(m_crosshairColor, 1, Qt::DashLine));
     p.drawLine(cx, r.top(), cx, r.bottom());
 
     double val  = m_history[static_cast<std::size_t>(m_hoveredSample)];
@@ -307,21 +308,25 @@ QString PerfGraphWidget::buildTooltip(int idx) const {
         return QStringLiteral("%1%").arg(v, 0, 'f', 1);
     };
 
+    const QString accent = m_lineColor.name();
+    const QString subtle = m_subtleTextColor.name();
+    const QString strong = m_textColor.name();
+
     QString html = QStringLiteral(
         "<table style='font-size:11px; white-space:nowrap;'>"
-        "<tr><td colspan='2' style='color:#17B378; font-weight:bold; padding-bottom:3px;'>%1</td></tr>"
-        "<tr><td style='color:#888; padding-right:8px;'>At cursor</td>"
-            "<td style='color:#fff;'>%2</td></tr>"
-        "<tr><td style='color:#888;'>%3</td>"
-            "<td style='color:#5ad3ff;'>%4</td></tr>"
-        "<tr><td style='color:#888;'>Current</td>"
-            "<td style='color:#fff;'>%5</td></tr>"
-        "<tr><td style='color:#888;'>Min</td>"
-            "<td style='color:#9ef'>%6</td></tr>"
-        "<tr><td style='color:#888;'>Max</td>"
-            "<td style='color:#f99'>%7</td></tr>"
-        "<tr><td style='color:#888;'>Avg</td>"
-            "<td style='color:#fd7;'>%8</td></tr>"
+        "<tr><td colspan='2' style='color:%9; font-weight:bold; padding-bottom:3px;'>%1</td></tr>"
+        "<tr><td style='color:%10; padding-right:8px;'>At cursor</td>"
+            "<td style='color:%11;'>%2</td></tr>"
+        "<tr><td style='color:%10;'>%3</td>"
+            "<td style='color:%11;'>%4</td></tr>"
+        "<tr><td style='color:%10;'>Current</td>"
+            "<td style='color:%11;'>%5</td></tr>"
+        "<tr><td style='color:%10;'>Min</td>"
+            "<td style='color:%11'>%6</td></tr>"
+        "<tr><td style='color:%10;'>Max</td>"
+            "<td style='color:%11'>%7</td></tr>"
+        "<tr><td style='color:%10;'>Avg</td>"
+            "<td style='color:%11;'>%8</td></tr>"
         "</table>")
         .arg(m_title)
         .arg(fmt(val))
@@ -331,7 +336,10 @@ QString PerfGraphWidget::buildTooltip(int idx) const {
         .arg(fmt(cur))
         .arg(fmt(minVal))
         .arg(fmt(maxVal))
-        .arg(fmt(avg));
+        .arg(fmt(avg))
+        .arg(accent)
+        .arg(subtle)
+        .arg(strong);
     return html;
 }
 }

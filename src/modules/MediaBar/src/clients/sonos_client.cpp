@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QNetworkInterface>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRegularExpression>
@@ -14,12 +15,14 @@
 
 #include <algorithm>
 
-// MediaBar: sonos client manages service client integration.
-
 namespace {
 
 constexpr auto SONOS_AV_TRANSPORT_CONTROL_PATH = "/MediaRenderer/AVTransport/Control";
 constexpr auto SONOS_AV_TRANSPORT_SERVICE = "urn:schemas-upnp-org:service:AVTransport:1";
+constexpr auto SONOS_CONTENT_DIRECTORY_PATH = "/MediaServer/ContentDirectory/Control";
+constexpr auto SONOS_CONTENT_DIRECTORY_SERVICE = "urn:schemas-upnp-org:service:ContentDirectory:1";
+constexpr auto SONOS_RENDERING_CONTROL_PATH = "/MediaRenderer/RenderingControl/Control";
+constexpr auto SONOS_RENDERING_CONTROL_SERVICE = "urn:schemas-upnp-org:service:RenderingControl:1";
 constexpr int REQUEST_TIMEOUT_MS = 2500;
 
 QString xmlEscaped(const QString& value) {
@@ -52,60 +55,99 @@ QString SonosClient::discoverSpeakerIp() const {
 
     lastDiscoverAtMs_ = now;
 
-    QUdpSocket socket;
-    socket.bind(QHostAddress::AnyIPv4, 0, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint);
-
     const QByteArray request =
         "M-SEARCH * HTTP/1.1\r\n"
         "HOST: 239.255.255.250:1900\r\n"
         "MAN: \"ssdp:discover\"\r\n"
-        "MX: 1\r\n"
+        "MX: 2\r\n"
         "ST: urn:schemas-upnp-org:device:ZonePlayer:1\r\n\r\n";
 
-    socket.writeDatagram(request, QHostAddress("239.255.255.250"), 1900);
+    const QHostAddress multicastAddr("239.255.255.250");
+    constexpr quint16 SSDP_PORT = 1900;
+    constexpr int MAX_RETRIES = 3;
+    constexpr int LISTEN_MS = 2500;
 
-    QElapsedTimer timer;
-    timer.start();
-
-    while (timer.elapsed() < 1800) {
-        if (!socket.waitForReadyRead(250)) {
+    QVector<QHostAddress> localAddrs;
+    for (const auto& iface : QNetworkInterface::allInterfaces()) {
+        if (!(iface.flags() & QNetworkInterface::IsUp) ||
+            !(iface.flags() & QNetworkInterface::IsRunning) ||
+            (iface.flags() & QNetworkInterface::IsLoopBack)) {
             continue;
         }
-        while (socket.hasPendingDatagrams()) {
-            QByteArray datagram;
-            datagram.resize(static_cast<int>(socket.pendingDatagramSize()));
-            QHostAddress sender;
-            quint16 senderPort = 0;
-            socket.readDatagram(datagram.data(), datagram.size(), &sender, &senderPort);
-
-            const QString text = QString::fromUtf8(datagram);
-            if (!text.contains("zoneplayer", Qt::CaseInsensitive) && !text.contains("sonos", Qt::CaseInsensitive)) {
-                continue;
+        for (const auto& entry : iface.addressEntries()) {
+            if (entry.ip().protocol() == QAbstractSocket::IPv4Protocol) {
+                localAddrs.push_back(entry.ip());
             }
+        }
+    }
+    if (localAddrs.isEmpty()) {
+        localAddrs.push_back(QHostAddress::AnyIPv4);
+    }
 
-            QRegularExpression locationRe(R"(LOCATION:\s*https?://([^/:\r\n]+))", QRegularExpression::CaseInsensitiveOption);
-            const auto match = locationRe.match(text);
-            if (match.hasMatch()) {
-                discoveredSpeakerIp_ = match.captured(1).trimmed();
-                if (!discoveredSpeakerIp_.isEmpty()) {
-                    return discoveredSpeakerIp_;
-                }
-            }
+    for (int attempt = 0; attempt < MAX_RETRIES; ++attempt) {
 
-            if (sender.protocol() == QAbstractSocket::IPv4Protocol) {
-                const QString senderIp = sender.toString().trimmed();
-                if (!senderIp.isEmpty()) {
-                    discoveredSpeakerIp_ = senderIp;
-                    return discoveredSpeakerIp_;
+        QVector<QUdpSocket*> sockets;
+        for (const auto& addr : localAddrs) {
+            auto* sock = new QUdpSocket();
+            sock->bind(addr, 0, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint);
+            sock->writeDatagram(request, multicastAddr, SSDP_PORT);
+            sockets.push_back(sock);
+        }
+
+        QElapsedTimer timer;
+        timer.start();
+
+        while (timer.elapsed() < LISTEN_MS) {
+            for (auto* sock : sockets) {
+                if (!sock->waitForReadyRead(100)) continue;
+                while (sock->hasPendingDatagrams()) {
+                    QByteArray datagram;
+                    datagram.resize(static_cast<int>(sock->pendingDatagramSize()));
+                    QHostAddress sender;
+                    quint16 senderPort = 0;
+                    sock->readDatagram(datagram.data(), datagram.size(), &sender, &senderPort);
+
+                    const QString text = QString::fromUtf8(datagram);
+                    if (!text.contains("zoneplayer", Qt::CaseInsensitive) &&
+                        !text.contains("sonos", Qt::CaseInsensitive)) {
+                        continue;
+                    }
+
+                    QRegularExpression locationRe(R"(LOCATION:\s*https?://([^/:\r\n]+))",
+                                                  QRegularExpression::CaseInsensitiveOption);
+                    const auto match = locationRe.match(text);
+                    if (match.hasMatch()) {
+                        discoveredSpeakerIp_ = match.captured(1).trimmed();
+                        if (!discoveredSpeakerIp_.isEmpty()) {
+                            qDeleteAll(sockets);
+                            return discoveredSpeakerIp_;
+                        }
+                    }
+
+                    if (sender.protocol() == QAbstractSocket::IPv4Protocol) {
+                        const QString senderIp = sender.toString().trimmed();
+                        if (!senderIp.isEmpty()) {
+                            discoveredSpeakerIp_ = senderIp;
+                            qDeleteAll(sockets);
+                            return discoveredSpeakerIp_;
+                        }
+                    }
                 }
             }
         }
+
+        qDeleteAll(sockets);
     }
 
     return QString();
 }
 
 QString SonosClient::speakerIp() const {
+
+    if (!userSelectedIp_.isEmpty()) {
+        return userSelectedIp_;
+    }
+
     const QString envIp = qEnvironmentVariable("SONOS_SPEAKER_IP").trimmed();
     if (!envIp.isEmpty()) {
         return envIp;
@@ -123,6 +165,14 @@ QUrl SonosClient::controlUrl() const {
     return QUrl(QString("http://%1:1400%2").arg(speakerIp(), SONOS_AV_TRANSPORT_CONTROL_PATH));
 }
 
+QUrl SonosClient::contentDirectoryUrl() const {
+    return QUrl(QString("http://%1:1400%2").arg(speakerIp(), SONOS_CONTENT_DIRECTORY_PATH));
+}
+
+QUrl SonosClient::renderingControlUrl() const {
+    return QUrl(QString("http://%1:1400%2").arg(speakerIp(), SONOS_RENDERING_CONTROL_PATH));
+}
+
 bool SonosClient::inBackoff() const {
     return QDateTime::currentMSecsSinceEpoch() < backoffUntilMs_;
 }
@@ -133,6 +183,11 @@ void SonosClient::noteBackoff(int seconds) {
 }
 
 std::optional<QByteArray> SonosClient::sendSoapAction(const QString& action, const QString& bodyXml) {
+    return sendSoapActionTo(controlUrl(), SONOS_AV_TRANSPORT_SERVICE, action, bodyXml);
+}
+
+std::optional<QByteArray> SonosClient::sendSoapActionTo(const QUrl& url, const QString& serviceUrn,
+                                                         const QString& action, const QString& bodyXml) {
     if (!hasSpeakerIp() || inBackoff()) {
         return std::nullopt;
     }
@@ -145,11 +200,11 @@ std::optional<QByteArray> SonosClient::sendSoapAction(const QString& action, con
         "<u:%1 xmlns:u=\"%2\">%3</u:%1>"
         "</s:Body>"
         "</s:Envelope>")
-            .arg(action, SONOS_AV_TRANSPORT_SERVICE, bodyXml);
+            .arg(action, serviceUrn, bodyXml);
 
-    QNetworkRequest req(controlUrl());
+    QNetworkRequest req(url);
     req.setHeader(QNetworkRequest::ContentTypeHeader, "text/xml; charset=\"utf-8\"");
-    req.setRawHeader("SOAPACTION", QString("\"%1#%2\"").arg(SONOS_AV_TRANSPORT_SERVICE, action).toUtf8());
+    req.setRawHeader("SOAPACTION", QString("\"%1#%2\"").arg(serviceUrn, action).toUtf8());
 
     QNetworkReply* reply = network_.post(req, envelope.toUtf8());
     QEventLoop loop;
@@ -378,4 +433,336 @@ bool SonosClient::addToQueueUri(const QString& uri, bool enqueueAsNext) {
                 "<EnqueueAsNext>%2</EnqueueAsNext>")
             .arg(xmlEscaped(normalized), enqueueAsNext ? "1" : "0"));
     return resp.has_value();
+}
+
+bool SonosClient::removeFromQueue(int queueIndex) {
+
+    const QString objectId = QString("Q:0/%1").arg(queueIndex + 1);
+
+    const auto resp = sendSoapActionTo(
+        contentDirectoryUrl(), SONOS_CONTENT_DIRECTORY_SERVICE,
+        "DestroyObject",
+        QString("<ObjectID>%1</ObjectID>").arg(xmlEscaped(objectId)));
+    return resp.has_value();
+}
+
+QVector<SonosClient::SonosQueueItem> SonosClient::getQueue(int maxItems) {
+    QVector<SonosQueueItem> out;
+
+    const auto resp = sendSoapActionTo(
+        contentDirectoryUrl(), SONOS_CONTENT_DIRECTORY_SERVICE,
+        "Browse",
+        QString("<ObjectID>Q:0</ObjectID>"
+                "<BrowseFlag>BrowseDirectChildren</BrowseFlag>"
+                "<Filter>dc:title,upnp:artist,upnp:album,upnp:albumArtURI,res</Filter>"
+                "<StartingIndex>0</StartingIndex>"
+                "<RequestedCount>%1</RequestedCount>"
+                "<SortCriteria></SortCriteria>")
+            .arg(maxItems));
+
+    if (!resp.has_value()) return out;
+
+    const QString responseXml = QString::fromUtf8(resp.value());
+    QString didl = extractTagValue(responseXml, "Result");
+
+    didl.replace("&lt;", "<");
+    didl.replace("&gt;", ">");
+    didl.replace("&amp;", "&");
+    didl.replace("&quot;", "\"");
+    didl.replace("&apos;", "'");
+
+    if (didl.isEmpty()) return out;
+
+    QXmlStreamReader xml(didl);
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (xml.isStartElement() && xml.name().toString() == "item") {
+            SonosQueueItem item;
+
+            while (!xml.atEnd()) {
+                xml.readNext();
+                if (xml.isEndElement() && xml.name().toString() == "item") break;
+                if (!xml.isStartElement()) continue;
+
+                const QString tag = xml.name().toString();
+                if (tag == "title") {
+                    item.title = xml.readElementText().trimmed();
+                } else if (tag == "creator" || tag == "artist") {
+                    if (item.artist.isEmpty())
+                        item.artist = xml.readElementText().trimmed();
+                } else if (tag == "album") {
+                    item.album = xml.readElementText().trimmed();
+                } else if (tag == "albumArtURI") {
+                    item.albumArtUri = xml.readElementText().trimmed();
+                } else if (tag == "res") {
+                    item.uri = xml.readElementText().trimmed();
+                }
+            }
+            if (!item.title.isEmpty()) {
+
+                if (!item.albumArtUri.isEmpty() && item.albumArtUri.startsWith('/')) {
+                    item.albumArtUri = QString("http://%1:1400%2").arg(speakerIp(), item.albumArtUri);
+                }
+                out.push_back(item);
+            }
+        }
+    }
+
+    return out;
+}
+
+QVector<SonosClient::SonosFavourite> SonosClient::getFavourites(int maxItems) {
+    QVector<SonosFavourite> out;
+
+    const auto resp = sendSoapActionTo(
+        contentDirectoryUrl(), SONOS_CONTENT_DIRECTORY_SERVICE,
+        "Browse",
+        QString("<ObjectID>FV:2</ObjectID>"
+                "<BrowseFlag>BrowseDirectChildren</BrowseFlag>"
+                "<Filter>dc:title,res,upnp:albumArtURI,upnp:class</Filter>"
+                "<StartingIndex>0</StartingIndex>"
+                "<RequestedCount>%1</RequestedCount>"
+                "<SortCriteria></SortCriteria>")
+            .arg(maxItems));
+
+    if (!resp.has_value()) return out;
+
+    const QString responseXml = QString::fromUtf8(resp.value());
+    QString didl = extractTagValue(responseXml, "Result");
+    didl.replace("&lt;", "<");
+    didl.replace("&gt;", ">");
+    didl.replace("&amp;", "&");
+    didl.replace("&quot;", "\"");
+    didl.replace("&apos;", "'");
+
+    if (didl.isEmpty()) return out;
+
+    QXmlStreamReader xml(didl);
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (!xml.isStartElement()) continue;
+        const QString tag = xml.name().toString();
+        if (tag != "item" && tag != "container") continue;
+
+        SonosFavourite fav;
+        while (!xml.atEnd()) {
+            xml.readNext();
+            if (xml.isEndElement() && (xml.name().toString() == "item" || xml.name().toString() == "container")) break;
+            if (!xml.isStartElement()) continue;
+
+            const QString inner = xml.name().toString();
+            if (inner == "title") {
+                fav.title = xml.readElementText().trimmed();
+            } else if (inner == "res") {
+                fav.uri = xml.readElementText().trimmed();
+            } else if (inner == "albumArtURI") {
+                fav.albumArtUri = xml.readElementText().trimmed();
+            } else if (inner == "class") {
+                const QString cls = xml.readElementText().trimmed().toLower();
+                if (cls.contains("track") || cls.contains("audio")) fav.type = "track";
+                else if (cls.contains("playlist")) fav.type = "playlist";
+                else if (cls.contains("album")) fav.type = "album";
+                else if (cls.contains("radio") || cls.contains("broadcast")) fav.type = "radio";
+                else fav.type = "other";
+            }
+        }
+        if (!fav.title.isEmpty()) {
+            if (!fav.albumArtUri.isEmpty() && fav.albumArtUri.startsWith('/')) {
+                fav.albumArtUri = QString("http://%1:1400%2").arg(speakerIp(), fav.albumArtUri);
+            }
+            out.push_back(fav);
+        }
+    }
+
+    return out;
+}
+
+QVector<SonosClient::SonosQueueItem> SonosClient::browsePlaylist(const QString& uri, int maxItems) {
+    QVector<SonosQueueItem> out;
+
+    const auto resp = sendSoapActionTo(
+        contentDirectoryUrl(), SONOS_CONTENT_DIRECTORY_SERVICE,
+        "Browse",
+        QString("<ObjectID>%1</ObjectID>"
+                "<BrowseFlag>BrowseDirectChildren</BrowseFlag>"
+                "<Filter>dc:title,upnp:artist,upnp:album,upnp:albumArtURI,res</Filter>"
+                "<StartingIndex>0</StartingIndex>"
+                "<RequestedCount>%2</RequestedCount>"
+                "<SortCriteria></SortCriteria>")
+            .arg(xmlEscaped(uri))
+            .arg(maxItems));
+
+    if (!resp.has_value()) return out;
+
+    const QString responseXml = QString::fromUtf8(resp.value());
+    QString didl = extractTagValue(responseXml, "Result");
+    didl.replace("&lt;", "<");
+    didl.replace("&gt;", ">");
+    didl.replace("&amp;", "&");
+    didl.replace("&quot;", "\"");
+    didl.replace("&apos;", "'");
+
+    if (didl.isEmpty()) return out;
+
+    QXmlStreamReader xml(didl);
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (xml.isStartElement() && xml.name().toString() == "item") {
+            SonosQueueItem item;
+            while (!xml.atEnd()) {
+                xml.readNext();
+                if (xml.isEndElement() && xml.name().toString() == "item") break;
+                if (!xml.isStartElement()) continue;
+                const QString t = xml.name().toString();
+                if (t == "title") item.title = xml.readElementText().trimmed();
+                else if (t == "creator" || t == "artist") {
+                    if (item.artist.isEmpty()) item.artist = xml.readElementText().trimmed();
+                }
+                else if (t == "album") item.album = xml.readElementText().trimmed();
+                else if (t == "albumArtURI") item.albumArtUri = xml.readElementText().trimmed();
+                else if (t == "res") item.uri = xml.readElementText().trimmed();
+            }
+            if (!item.title.isEmpty()) {
+                if (!item.albumArtUri.isEmpty() && item.albumArtUri.startsWith('/'))
+                    item.albumArtUri = QString("http://%1:1400%2").arg(speakerIp(), item.albumArtUri);
+                out.push_back(item);
+            }
+        }
+    }
+
+    return out;
+}
+
+std::optional<int> SonosClient::getVolume() {
+    const auto resp = sendSoapActionTo(
+        renderingControlUrl(), SONOS_RENDERING_CONTROL_SERVICE,
+        "GetVolume",
+        "<InstanceID>0</InstanceID><Channel>Master</Channel>");
+
+    if (!resp.has_value()) return std::nullopt;
+
+    const QString xml = QString::fromUtf8(resp.value());
+    const QString vol = extractTagValue(xml, "CurrentVolume");
+    bool ok = false;
+    const int value = vol.toInt(&ok);
+    return ok ? std::optional<int>(value) : std::nullopt;
+}
+
+bool SonosClient::setVolume(int percent) {
+    const int clamped = std::clamp(percent, 0, 100);
+    const auto resp = sendSoapActionTo(
+        renderingControlUrl(), SONOS_RENDERING_CONTROL_SERVICE,
+        "SetVolume",
+        QString("<InstanceID>0</InstanceID><Channel>Master</Channel><DesiredVolume>%1</DesiredVolume>")
+            .arg(clamped));
+    return resp.has_value();
+}
+
+void SonosClient::setTargetSpeakerIp(const QString& ip) {
+    userSelectedIp_ = ip.trimmed();
+
+    discoveredSpeakerIp_.clear();
+    backoffUntilMs_ = 0;
+}
+
+QString SonosClient::targetSpeakerIp() const {
+    return speakerIp();
+}
+
+QVector<SonosClient::SonosGroup> SonosClient::getZoneGroups() {
+    QVector<SonosGroup> groups;
+
+    const QString ip = speakerIp();
+    if (ip.isEmpty()) return groups;
+
+    QNetworkRequest req(QUrl(QString("http://%1:1400/status/topology").arg(ip)));
+    req.setTransferTimeout(REQUEST_TIMEOUT_MS);
+
+    QNetworkReply* reply = network_.get(req);
+    QEventLoop loop;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    QObject::connect(&timeout, &QTimer::timeout, [&]() {
+        if (reply->isRunning()) reply->abort();
+    });
+    timeout.start(REQUEST_TIMEOUT_MS);
+    loop.exec();
+
+    const QByteArray data = reply->readAll();
+    const auto error = reply->error();
+    reply->deleteLater();
+
+    if (error != QNetworkReply::NoError || data.isEmpty()) return groups;
+
+    struct RawZone {
+        QString name;
+        QString ip;
+        QString uuid;
+        QString groupId;
+        bool isCoordinator = false;
+    };
+    QVector<RawZone> rawZones;
+
+    QXmlStreamReader xml(data);
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (!xml.isStartElement() || xml.name().toString() != "ZonePlayer") continue;
+
+        RawZone z;
+        z.name = xml.attributes().value("name").toString();
+        z.uuid = xml.attributes().value("uuid").toString();
+        z.groupId = xml.attributes().value("group").toString();
+        z.isCoordinator = (xml.attributes().value("coordinator").toString() == "true");
+
+        const QString location = xml.attributes().value("location").toString();
+
+        QRegularExpression ipRe(R"(https?://([^/:\r\n]+))");
+        const auto match = ipRe.match(location);
+        if (match.hasMatch()) {
+            z.ip = match.captured(1);
+        }
+
+        if (!z.name.isEmpty() && !z.groupId.isEmpty()) {
+            rawZones.push_back(z);
+        }
+    }
+
+    QHash<QString, int> groupIndexMap;
+    for (const auto& z : rawZones) {
+        SonosZone zone;
+        zone.name = z.name;
+        zone.ip = z.ip;
+        zone.uuid = z.uuid;
+        zone.groupId = z.groupId;
+        zone.isCoordinator = z.isCoordinator;
+
+        auto it = groupIndexMap.find(z.groupId);
+        if (it == groupIndexMap.end()) {
+            SonosGroup grp;
+            grp.members.push_back(zone);
+            if (z.isCoordinator) {
+                grp.coordinatorName = z.name;
+                grp.coordinatorIp = z.ip;
+            }
+            groupIndexMap.insert(z.groupId, groups.size());
+            groups.push_back(grp);
+        } else {
+            auto& grp = groups[it.value()];
+            grp.members.push_back(zone);
+            if (z.isCoordinator) {
+                grp.coordinatorName = z.name;
+                grp.coordinatorIp = z.ip;
+            }
+        }
+    }
+
+    for (auto& grp : groups) {
+        if (grp.coordinatorName.isEmpty() && !grp.members.isEmpty()) {
+            grp.coordinatorName = grp.members.first().name;
+            grp.coordinatorIp = grp.members.first().ip;
+        }
+    }
+
+    return groups;
 }

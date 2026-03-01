@@ -4,9 +4,9 @@
 
 #include <QCoreApplication>
 
+#ifdef Q_OS_WIN
 #include <windows.h>
-
-// WinTools: hotkey engine manages shared infrastructure.
+#endif
 
 namespace wintools::hotkeys {
 
@@ -51,6 +51,7 @@ void HotkeyEngine::registerAll() {
             continue;
         }
 
+#ifdef Q_OS_WIN
         const int id = m_nextId++;
         if (RegisterHotKey(nullptr, id, binding.winMods | MOD_NOREPEAT, binding.vk)) {
             m_idToAction.insert(id, binding.action);
@@ -66,19 +67,32 @@ void HotkeyEngine::registerAll() {
                     .arg(displayString(binding))
                     .arg(GetLastError()));
         }
+#else
+
+        const int id = m_nextId++;
+        m_idToAction.insert(id, binding.action);
+        wintools::logger::Logger::log(
+            LogSource, wintools::logger::Severity::Warning,
+            QString("Global hotkeys are not yet supported on this platform. "
+                    "Binding '%1' was saved but will not be active.")
+                .arg(displayString(binding)));
+#endif
     }
 }
 
 void HotkeyEngine::unregisterAll() {
+#ifdef Q_OS_WIN
     for (auto it = m_idToAction.cbegin(); it != m_idToAction.cend(); ++it) {
         UnregisterHotKey(nullptr, it.key());
     }
+#endif
     m_idToAction.clear();
 }
 
 bool HotkeyEngine::nativeEventFilter(const QByteArray& eventType,
                                      void*             message,
                                      qintptr*          ) {
+#ifdef Q_OS_WIN
     if (eventType != "windows_generic_MSG") return false;
 
     const auto* msg = static_cast<const MSG*>(message);
@@ -89,6 +103,10 @@ bool HotkeyEngine::nativeEventFilter(const QByteArray& eventType,
     if (it != m_idToAction.constEnd()) {
         emit hotkeyTriggered(it.value());
     }
+#else
+    Q_UNUSED(eventType);
+    Q_UNUSED(message);
+#endif
     return false;
 }
 
@@ -108,6 +126,7 @@ unsigned int HotkeyEngine::parseVirtualKey(const QString& key) {
     if (k.size() == 1 && k[0] >= '0' && k[0] <= '9')
         return static_cast<unsigned int>(k[0].unicode());
 
+#ifdef Q_OS_WIN
     static const QHash<QString, unsigned int> named = {
         {"SPACE",         VK_SPACE},
         {"ENTER",         VK_RETURN},
@@ -170,6 +189,31 @@ unsigned int HotkeyEngine::parseVirtualKey(const QString& key) {
         {"VOLUME_DOWN",   VK_VOLUME_DOWN},
         {"VOLUME_MUTE",   VK_VOLUME_MUTE},
     };
+#else
+
+    static const QHash<QString, unsigned int> named = {
+        {"SPACE",         0x20}, {"ENTER",         0x0D}, {"RETURN",        0x0D},
+        {"TAB",           0x09}, {"ESCAPE",        0x1B}, {"ESC",           0x1B},
+        {"BACKSPACE",     0x08}, {"DELETE",        0x2E}, {"DEL",           0x2E},
+        {"INSERT",        0x2D}, {"INS",           0x2D}, {"HOME",          0x24},
+        {"END",           0x23}, {"PAGEUP",        0x21}, {"PGUP",          0x21},
+        {"PAGEDOWN",      0x22}, {"PGDN",          0x22}, {"UP",            0x26},
+        {"DOWN",          0x28}, {"LEFT",          0x25}, {"RIGHT",         0x27},
+        {"NUMPAD0",       0x60}, {"NUMPAD1",       0x61}, {"NUMPAD2",       0x62},
+        {"NUMPAD3",       0x63}, {"NUMPAD4",       0x64}, {"NUMPAD5",       0x65},
+        {"NUMPAD6",       0x66}, {"NUMPAD7",       0x67}, {"NUMPAD8",       0x68},
+        {"NUMPAD9",       0x69}, {"MULTIPLY",      0x6A}, {"ADD",           0x6B},
+        {"SUBTRACT",      0x6D}, {"DECIMAL",       0x6E}, {"DIVIDE",        0x6F},
+        {"CAPSLOCK",      0x14}, {"NUMLOCK",       0x90}, {"SCROLLLOCK",    0x91},
+        {"PAUSE",         0x13}, {"PRINTSCREEN",   0x2C}, {"APPS",          0x5D},
+        {"SEMICOLON",     0xBA}, {"EQUALS",        0xBB}, {"COMMA",         0xBC},
+        {"MINUS",         0xBD}, {"PERIOD",        0xBE}, {"SLASH",         0xBF},
+        {"TILDE",         0xC0}, {"LBRACKET",      0xDB}, {"BACKSLASH",     0xDC},
+        {"RBRACKET",      0xDD}, {"QUOTE",         0xDE}, {"MEDIA_PLAY",    0xB3},
+        {"MEDIA_PAUSE",   0xB3}, {"MEDIA_NEXT",    0xB0}, {"MEDIA_PREV",    0xB1},
+        {"VOLUME_UP",     0xAF}, {"VOLUME_DOWN",   0xAE}, {"VOLUME_MUTE",   0xAD},
+    };
+#endif
 
     return named.value(k, 0u);
 }
@@ -178,10 +222,18 @@ unsigned int HotkeyEngine::parseModifiers(const QList<QString>& mods) {
     unsigned int result = 0;
     for (const QString& m : mods) {
         const QString mu = m.toUpper().trimmed();
+#ifdef Q_OS_WIN
         if      (mu == "CTRL"  || mu == "CONTROL") result |= MOD_CONTROL;
         else if (mu == "ALT")                       result |= MOD_ALT;
         else if (mu == "SHIFT")                     result |= MOD_SHIFT;
         else if (mu == "WIN"   || mu == "WINDOWS")  result |= MOD_WIN;
+#else
+
+        if      (mu == "CTRL"  || mu == "CONTROL") result |= 0x0002;
+        else if (mu == "ALT")                       result |= 0x0001;
+        else if (mu == "SHIFT")                     result |= 0x0004;
+        else if (mu == "WIN"   || mu == "WINDOWS")  result |= 0x0008;
+#endif
     }
     return result;
 }

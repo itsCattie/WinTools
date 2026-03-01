@@ -2,11 +2,16 @@
 #include "common/themes/theme_helper.hpp"
 #include "common/themes/theme_listener.hpp"
 #include "common/themes/fluent_style.hpp"
+#include "common/themes/color_utils.hpp"
 #include "common/ui/screen_relative_size.hpp"
 #include "logger/logger.hpp"
 
 #include <QApplication>
+#include <QClipboard>
+#include <QCryptographicHash>
+#include <QDesktopServices>
 #include <QDir>
+#include <QFileDialog>
 #include <QMouseEvent>
 #include <QFileInfo>
 #include <QFrame>
@@ -15,24 +20,55 @@
 #include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPainter>
+#include <QProcess>
 #include <QProgressBar>
+#include <QProgressDialog>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollArea>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
 #include <QStorageInfo>
 #include <QStyledItemDelegate>
+#include <QTextStream>
 #include <QTimer>
 #include <QToolTip>
 #include <QTreeView>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
+#include <QUrl>
 #include <QVBoxLayout>
-
-// DiskSentinel: disk sentinel window manages UI behavior and presentation.
 
 namespace wintools::disksentinel {
 
 static constexpr const char* kLog = "DiskSentinel/Window";
+
+QString normalizedPathKey(const QString& path) {
+    return QDir::cleanPath(path).toLower();
+}
+
+QColor categoryBaseColor(const QString& category) {
+    if (category == "image") return QColor(0x5b, 0x9b, 0xd5);
+    if (category == "video") return QColor(0xc0, 0x39, 0x2b);
+    if (category == "audio") return QColor(0x27, 0xae, 0x60);
+    if (category == "document") return QColor(0xe6, 0xac, 0x00);
+    if (category == "archive") return QColor(0x8e, 0x44, 0xad);
+    if (category == "code") return QColor(0x16, 0xa0, 0x85);
+    if (category == "executable") return QColor(0xe6, 0x7e, 0x22);
+    return QColor(0x7f, 0x8c, 0x8d);
+}
+
+QColor categoryThemeColor(const QString& category,
+                          const wintools::themes::ThemePalette& palette,
+                          bool darkTheme) {
+    const QColor base = categoryBaseColor(category);
+    if (darkTheme) {
+        return wintools::themes::blendColor(base, palette.windowBackground, 0.08f);
+    }
+    return wintools::themes::blendColor(base, palette.windowBackground, 0.32f);
+}
 
 class ShareBarDelegate : public QStyledItemDelegate {
 public:
@@ -53,7 +89,13 @@ public:
         const double fraction = index.data(StorageModel::FractionRole).toDouble();
         const QRect  r        = opt.rect.adjusted(4, 3, -4, -3);
 
-        painter->fillRect(r, opt.palette.mid().color());
+        QColor trackColor = opt.palette.base().color();
+        if (trackColor.lightness() < 128) {
+            trackColor = trackColor.lighter(150);
+        } else {
+            trackColor = trackColor.darker(106);
+        }
+        painter->fillRect(r, trackColor);
 
         const int barW = static_cast<int>(r.width() * qBound(0.0, fraction, 1.0));
         if (barW > 0) {
@@ -61,7 +103,7 @@ public:
             QColor barColor = isDir ? opt.palette.highlight().color()
                                     : QColor(0x27, 0xae, 0x60);
 
-            if (fraction > 0.5)  barColor = barColor.darker(100 + static_cast<int>(40 * fraction));
+            if (fraction > 0.5)  barColor = barColor.darker(100 + static_cast<int>(22 * fraction));
             if (fraction > 0.8)  barColor = QColor(0xc0, 0x39, 0x2b);
             painter->fillRect(QRect(r.x(), r.y(), barW, r.height()), barColor);
         }
@@ -88,6 +130,8 @@ DiskSentinelWindow::DiskSentinelWindow(QWidget* parent)
 
     wintools::logger::Logger::log(kLog, wintools::logger::Severity::Pass,
                                    "DiskSentinelWindow created.");
+
+    m_progressUiTimer.start();
 
     buildUi();
     applyTheme();
@@ -201,6 +245,20 @@ void DiskSentinelWindow::buildToolBar() {
     connect(m_expandCollapseBtn, &QPushButton::clicked,
             this, &DiskSentinelWindow::toggleExpandCollapse);
 
+    m_exportBtn = new QPushButton(QStringLiteral("⬇ Export CSV"), this);
+    m_exportBtn->setFixedSize(100, 28);
+    m_exportBtn->setToolTip(QStringLiteral("Export the current scan results to a CSV file"));
+    m_exportBtn->setEnabled(false);
+    connect(m_exportBtn, &QPushButton::clicked,
+            this, &DiskSentinelWindow::exportCsv);
+
+    m_findDupesBtn = new QPushButton(QStringLiteral("🔍 Duplicates"), this);
+    m_findDupesBtn->setFixedSize(110, 28);
+    m_findDupesBtn->setToolTip(QStringLiteral("Find duplicate files by content hash"));
+    m_findDupesBtn->setEnabled(false);
+    connect(m_findDupesBtn, &QPushButton::clicked,
+            this, &DiskSentinelWindow::findDuplicates);
+
     m_statusLabel = new QLabel(QStringLiteral("Ready"), this);
     m_statusLabel->setMinimumWidth(200);
     m_statusLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -217,6 +275,8 @@ void DiskSentinelWindow::buildToolBar() {
     hbox->addWidget(m_rescanBtn);
     hbox->addWidget(m_reloadBtn);
     hbox->addWidget(m_expandCollapseBtn);
+    hbox->addWidget(m_exportBtn);
+    hbox->addWidget(m_findDupesBtn);
     hbox->addWidget(m_scanProgress);
     hbox->addWidget(m_statusLabel);
 
@@ -247,6 +307,10 @@ void DiskSentinelWindow::buildMainSplitter() {
     m_treeView->setItemDelegateForColumn(StorageModel::ColShare,
                                          new ShareBarDelegate(m_treeView));
 
+    m_treeView->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_treeView, &QTreeView::customContextMenuRequested,
+            this, &DiskSentinelWindow::onTreeContextMenu);
+
     connect(m_treeView->selectionModel(),
             &QItemSelectionModel::currentChanged,
             this, [this](const QModelIndex&, const QModelIndex&) {
@@ -263,8 +327,18 @@ void DiskSentinelWindow::buildMainSplitter() {
                                                       DiskNode::prettySize(node->size)));
     });
 
+    m_pieChart = new PieChartWidget(this);
+    m_pieChart->setThemePalette(m_palette);
+
+    m_rightSplitter = new QSplitter(Qt::Vertical, this);
+    m_rightSplitter->addWidget(m_treemap);
+    m_rightSplitter->addWidget(m_pieChart);
+    m_rightSplitter->setSizes({600, 200});
+    m_rightSplitter->setStretchFactor(0, 3);
+    m_rightSplitter->setStretchFactor(1, 1);
+
     m_splitter->addWidget(m_treeView);
-    m_splitter->addWidget(m_treemap);
+    m_splitter->addWidget(m_rightSplitter);
     m_splitter->setSizes({350, 900});
     m_splitter->setStretchFactor(0, 0);
     m_splitter->setStretchFactor(1, 1);
@@ -294,9 +368,13 @@ void DiskSentinelWindow::buildLegend() {
     for (const auto& e : entries) {
         auto* swatch = new QFrame(this);
         swatch->setFixedSize(14, 14);
+        swatch->setObjectName(QStringLiteral("legendSwatch"));
+        swatch->setProperty("category", e.cat);
         swatch->setStyleSheet(QStringLiteral("background:%1;border-radius:2px;")
                                 .arg(e.col.name()));
         auto* lbl = new QLabel(e.label, this);
+        lbl->setObjectName(QStringLiteral("legendLabel"));
+        lbl->setProperty("category", e.cat);
         lbl->setStyleSheet(QStringLiteral("font-size:11px;"));
         hbox->addWidget(swatch);
         hbox->addWidget(lbl);
@@ -475,12 +553,22 @@ void DiskSentinelWindow::onScanStarted(const QString& path) {
     m_upBtn->setEnabled(false);
     m_reloadBtn->setEnabled(false);
     m_expandCollapseBtn->setEnabled(false);
+    m_exportBtn->setEnabled(false);
+    m_findDupesBtn->setEnabled(false);
     m_scanProgress->setVisible(true);
+    m_lastProgressUiMs = 0;
+    m_progressUiTimer.restart();
     setStatus(QStringLiteral("Scanning…"), true);
 }
 
 void DiskSentinelWindow::onScanProgress(int files, qint64 bytes,
                                          const QString& currentPath) {
+    const qint64 nowMs = m_progressUiTimer.elapsed();
+    if (nowMs - m_lastProgressUiMs < 120) {
+        return;
+    }
+    m_lastProgressUiMs = nowMs;
+
     setStatus(QStringLiteral("Scanning: %1 files, %2 — %3")
               .arg(files).arg(DiskNode::prettySize(bytes))
               .arg(QDir(currentPath).dirName()));
@@ -492,16 +580,20 @@ void DiskSentinelWindow::onScanFinished(std::shared_ptr<DiskNode> root) {
             .arg(root ? root->path : QStringLiteral("(null)"),
                  DiskNode::prettySize(root ? root->size : 0)));
     m_scanRoot = std::move(root);
+    rebuildPathIndex();
     m_model->setRoot(m_scanRoot);
     setDisplayRoot(m_scanRoot.get());
     m_scanProgress->setVisible(false);
     m_reloadBtn->setEnabled(true);
     m_expandCollapseBtn->setEnabled(true);
+    m_exportBtn->setEnabled(true);
+    m_findDupesBtn->setEnabled(true);
 
     m_treeExpanded = false;
     m_expandCollapseBtn->setText(QStringLiteral("⊞ Expand All"));
     m_treeView->expandToDepth(1);
-    m_treeView->resizeColumnToContents(StorageModel::ColSize);
+    m_treeView->header()->setSectionResizeMode(StorageModel::ColSize,
+                                               QHeaderView::ResizeToContents);
     setStatus(QStringLiteral("Scan complete — %1 total in %2")
               .arg(DiskNode::prettySize(m_scanRoot ? m_scanRoot->size : 0),
                    m_scanRoot ? m_scanRoot->path : QString{}));
@@ -517,6 +609,7 @@ void DiskSentinelWindow::onScanCancelled() {
 void DiskSentinelWindow::setDisplayRoot(DiskNode* node) {
     m_displayRoot = node;
     m_treemap->setRoot(node);
+    m_pieChart->setRoot(node);
     updatePathBar(node);
 
     m_upBtn->setEnabled(node && node->parent != nullptr);
@@ -554,21 +647,37 @@ void DiskSentinelWindow::navigateUp() {
 void DiskSentinelWindow::navigatePath(const QString& path) {
     if (path.isEmpty()) return;
 
-    if (m_scanRoot) {
-        DiskNode* found = nullptr;
-        std::function<void(DiskNode*)> search = [&](DiskNode* n) {
-            if (!n) return;
-            if (n->path == path || QDir::cleanPath(n->path) == QDir::cleanPath(path)) {
-                found = n;
-                return;
-            }
-            for (auto& c : n->children) search(c.get());
-        };
-        search(m_scanRoot.get());
-        if (found) { navigateTo(found); return; }
+    if (!m_pathIndex.isEmpty()) {
+        auto it = m_pathIndex.constFind(normalizedPathKey(path));
+        if (it != m_pathIndex.constEnd() && it.value()) {
+            navigateTo(it.value());
+            return;
+        }
     }
 
     scanDrive(path);
+}
+
+void DiskSentinelWindow::rebuildPathIndex() {
+    m_pathIndex.clear();
+    if (!m_scanRoot) return;
+
+    QVector<DiskNode*> stack;
+    stack.reserve(4096);
+    stack.push_back(m_scanRoot.get());
+
+    while (!stack.isEmpty()) {
+        DiskNode* node = stack.back();
+        stack.pop_back();
+        if (!node) continue;
+
+        m_pathIndex.insert(normalizedPathKey(node->path), node);
+        for (const auto& child : node->children) {
+            if (child) {
+                stack.push_back(child.get());
+            }
+        }
+    }
 }
 
 void DiskSentinelWindow::onTreeSelectionChanged() {
@@ -601,8 +710,384 @@ void DiskSentinelWindow::setStatus(const QString& msg, bool busy) {
     Q_UNUSED(busy);
 }
 
+void DiskSentinelWindow::onTreeContextMenu(const QPoint& pos) {
+    const QModelIndex idx = m_treeView->indexAt(pos);
+    if (!idx.isValid()) return;
+
+    DiskNode* node = StorageModel::nodeForIndex(idx.siblingAtColumn(0));
+    if (!node) return;
+
+    QMenu menu(this);
+
+    menu.addAction(QStringLiteral("Open in Explorer"), this, [node]() {
+        const QString target = node->isDir ? node->path
+                                           : QFileInfo(node->path).absolutePath();
+        QDesktopServices::openUrl(QUrl::fromLocalFile(target));
+    });
+
+    menu.addAction(QStringLiteral("Copy Path"), this, [node]() {
+        QApplication::clipboard()->setText(QDir::toNativeSeparators(node->path));
+    });
+
+    menu.addAction(QStringLiteral("Copy Size"), this, [node]() {
+        QApplication::clipboard()->setText(DiskNode::prettySize(node->size));
+    });
+
+    if (node->isDir) {
+        menu.addSeparator();
+        menu.addAction(QStringLiteral("Navigate Into"), this, [this, node]() {
+            navigateTo(node);
+        });
+    }
+
+    menu.exec(m_treeView->viewport()->mapToGlobal(pos));
+}
+
+void DiskSentinelWindow::exportCsv() {
+    if (!m_scanRoot) return;
+
+    const QString defaultName = QStringLiteral("DiskSentinel_%1.csv")
+        .arg(QDir(m_scanRoot->path).dirName().replace(QRegularExpression("[^a-zA-Z0-9_]"), "_"));
+
+    const QString filePath = QFileDialog::getSaveFileName(
+        this,
+        QStringLiteral("Export Scan Results"),
+        defaultName,
+        QStringLiteral("CSV Files (*.csv);;All Files (*)"));
+
+    if (filePath.isEmpty()) return;
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        wintools::logger::Logger::log(kLog, wintools::logger::Severity::Error,
+            QStringLiteral("CSV export failed: could not open '%1'").arg(filePath));
+        setStatus(QStringLiteral("Export failed: could not write file."));
+        return;
+    }
+
+    QTextStream out(&file);
+    out << "Name,Path,Size (bytes),Size,Items,Type,Category\n";
+
+    QVector<DiskNode*> stack;
+    stack.reserve(4096);
+    stack.push_back(m_scanRoot.get());
+
+    int rows = 0;
+    while (!stack.isEmpty()) {
+        DiskNode* node = stack.back();
+        stack.pop_back();
+        if (!node) continue;
+
+        auto escape = [](const QString& s) -> QString {
+            if (s.contains(QLatin1Char(',')) || s.contains(QLatin1Char('"')) || s.contains(QLatin1Char('\n'))) {
+                QString escaped = s;
+                escaped.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+                return QLatin1Char('"') + escaped + QLatin1Char('"');
+            }
+            return s;
+        };
+
+        const QString type = node->isDir ? QStringLiteral("Directory") : QStringLiteral("File");
+        const QString cat  = node->isDir ? QString{} : DiskNode::category(node->name);
+
+        out << escape(node->name) << ','
+            << escape(QDir::toNativeSeparators(node->path)) << ','
+            << node->size << ','
+            << escape(DiskNode::prettySize(node->size)) << ','
+            << node->itemCount << ','
+            << type << ','
+            << cat << '\n';
+
+        ++rows;
+
+        for (auto it = node->children.rbegin(); it != node->children.rend(); ++it) {
+            if (*it) stack.push_back(it->get());
+        }
+    }
+
+    file.close();
+    wintools::logger::Logger::log(kLog, wintools::logger::Severity::Pass,
+        QStringLiteral("CSV exported: %1 rows → '%2'").arg(rows).arg(filePath));
+    setStatus(QStringLiteral("Exported %1 entries to CSV.").arg(rows));
+}
+
+void DiskSentinelWindow::findDuplicates() {
+    if (!m_scanRoot) return;
+
+    setStatus(QStringLiteral("Finding duplicates…"), true);
+    QApplication::processEvents();
+
+    QHash<qint64, QVector<DiskNode*>> bySize;
+    {
+        QVector<DiskNode*> stack;
+        stack.reserve(4096);
+        stack.push_back(m_scanRoot.get());
+        while (!stack.isEmpty()) {
+            DiskNode* node = stack.back();
+            stack.pop_back();
+            if (!node) continue;
+            if (!node->isDir && node->size > 0) {
+                bySize[node->size].push_back(node);
+            }
+            for (auto it = node->children.rbegin(); it != node->children.rend(); ++it) {
+                if (*it) stack.push_back(it->get());
+            }
+        }
+    }
+
+    QVector<QPair<qint64, QVector<DiskNode*>>> candidates;
+    int totalToHash = 0;
+    for (auto it = bySize.begin(); it != bySize.end(); ++it) {
+        if (it.value().size() > 1) {
+            candidates.push_back({it.key(), it.value()});
+            totalToHash += it.value().size();
+        }
+    }
+
+    if (totalToHash == 0) {
+        setStatus(QStringLiteral("No potential duplicates found (all files have unique sizes)."));
+        return;
+    }
+
+    constexpr qint64 kPartialSize = 8192;
+
+    QProgressDialog progress(QStringLiteral("Hashing files for duplicate detection…"),
+                             QStringLiteral("Cancel"), 0, totalToHash, this);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(0);
+    int hashed = 0;
+
+    QHash<QByteArray, QVector<DiskNode*>> duplicateGroups;
+
+    for (const auto& [fileSize, nodes] : candidates) {
+        if (progress.wasCanceled()) break;
+
+        QHash<QByteArray, QVector<DiskNode*>> partialGroups;
+        for (DiskNode* node : nodes) {
+            if (progress.wasCanceled()) break;
+            progress.setValue(hashed++);
+            QApplication::processEvents();
+
+            QFile file(node->path);
+            if (!file.open(QIODevice::ReadOnly)) continue;
+
+            QCryptographicHash hasher(QCryptographicHash::Sha256);
+            const QByteArray chunk = file.read(kPartialSize);
+            hasher.addData(chunk);
+            const QByteArray partialHash = hasher.result();
+            partialGroups[partialHash].push_back(node);
+        }
+
+        for (auto pit = partialGroups.begin(); pit != partialGroups.end(); ++pit) {
+            if (pit.value().size() < 2) continue;
+
+            if (fileSize <= kPartialSize) {
+
+                duplicateGroups[pit.key()].append(pit.value());
+            } else {
+
+                QHash<QByteArray, QVector<DiskNode*>> fullGroups;
+                for (DiskNode* node : pit.value()) {
+                    if (progress.wasCanceled()) break;
+
+                    QFile file(node->path);
+                    if (!file.open(QIODevice::ReadOnly)) continue;
+
+                    QCryptographicHash hasher(QCryptographicHash::Sha256);
+                    while (!file.atEnd()) {
+                        hasher.addData(file.read(65536));
+                    }
+                    fullGroups[hasher.result()].push_back(node);
+                }
+                for (auto fit = fullGroups.begin(); fit != fullGroups.end(); ++fit) {
+                    if (fit.value().size() > 1) {
+                        duplicateGroups[fit.key()].append(fit.value());
+                    }
+                }
+            }
+        }
+    }
+
+    progress.setValue(totalToHash);
+
+    if (progress.wasCanceled()) {
+        setStatus(QStringLiteral("Duplicate search cancelled."));
+        return;
+    }
+
+    int groupCount = duplicateGroups.size();
+    int totalDupeFiles = 0;
+    qint64 wastedBytes = 0;
+    for (auto it = duplicateGroups.begin(); it != duplicateGroups.end(); ++it) {
+        totalDupeFiles += it.value().size();
+
+        if (!it.value().isEmpty()) {
+            wastedBytes += static_cast<qint64>(it.value().size() - 1) * it.value().first()->size;
+        }
+    }
+
+    if (groupCount == 0) {
+        setStatus(QStringLiteral("No duplicate files found."));
+        wintools::logger::Logger::log(kLog, wintools::logger::Severity::Pass,
+            QStringLiteral("Duplicate scan: no duplicates found."));
+        return;
+    }
+
+    auto* dlg = new QDialog(this);
+    dlg->setWindowTitle(QStringLiteral("Duplicate Files — %1 groups, %2 wasted")
+                            .arg(groupCount).arg(DiskNode::prettySize(wastedBytes)));
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->resize(900, 600);
+
+    auto* dlgLayout = new QVBoxLayout(dlg);
+    dlgLayout->setContentsMargins(12, 12, 12, 12);
+    dlgLayout->setSpacing(8);
+
+    auto* summaryLabel = new QLabel(
+        QStringLiteral("Found <b>%1</b> duplicate groups (%2 files). "
+                       "Potential space savings: <b>%3</b>.")
+            .arg(groupCount).arg(totalDupeFiles).arg(DiskNode::prettySize(wastedBytes)),
+        dlg);
+    summaryLabel->setWordWrap(true);
+
+    auto* tree = new QTreeWidget(dlg);
+    tree->setHeaderLabels({QStringLiteral("Name / Path"), QStringLiteral("Size"),
+                           QStringLiteral("SHA-256 (partial)")});
+    tree->setColumnWidth(0, 500);
+    tree->setColumnWidth(1, 100);
+    tree->setAlternatingRowColors(true);
+    tree->setRootIsDecorated(true);
+    tree->setContextMenuPolicy(Qt::CustomContextMenu);
+
+    QVector<QPair<QByteArray, QVector<DiskNode*>>> sortedGroups;
+    sortedGroups.reserve(groupCount);
+    for (auto it = duplicateGroups.begin(); it != duplicateGroups.end(); ++it) {
+        sortedGroups.push_back({it.key(), it.value()});
+    }
+    std::sort(sortedGroups.begin(), sortedGroups.end(),
+              [](const auto& a, const auto& b) {
+                  qint64 wa = a.second.isEmpty() ? 0 : static_cast<qint64>(a.second.size() - 1) * a.second.first()->size;
+                  qint64 wb = b.second.isEmpty() ? 0 : static_cast<qint64>(b.second.size() - 1) * b.second.first()->size;
+                  return wa > wb;
+              });
+
+    for (const auto& [hash, nodes] : sortedGroups) {
+        if (nodes.isEmpty()) continue;
+        const qint64 wasted = static_cast<qint64>(nodes.size() - 1) * nodes.first()->size;
+
+        auto* groupItem = new QTreeWidgetItem(tree);
+        groupItem->setText(0, QStringLiteral("%1 copies — %2 wasted")
+                                  .arg(nodes.size()).arg(DiskNode::prettySize(wasted)));
+        groupItem->setText(1, DiskNode::prettySize(nodes.first()->size));
+        groupItem->setText(2, QString::fromLatin1(hash.toHex().left(16)));
+        groupItem->setExpanded(false);
+
+        auto groupFont = groupItem->font(0);
+        groupFont.setBold(true);
+        groupItem->setFont(0, groupFont);
+
+        for (DiskNode* node : nodes) {
+            auto* fileItem = new QTreeWidgetItem(groupItem);
+            fileItem->setText(0, QDir::toNativeSeparators(node->path));
+            fileItem->setText(1, DiskNode::prettySize(node->size));
+            fileItem->setData(0, Qt::UserRole, node->path);
+        }
+    }
+
+    connect(tree, &QTreeWidget::customContextMenuRequested, dlg, [tree](const QPoint& pos) {
+        auto* item = tree->itemAt(pos);
+        if (!item) return;
+        const QString path = item->data(0, Qt::UserRole).toString();
+        if (path.isEmpty()) return;
+
+        QMenu menu;
+        menu.addAction(QStringLiteral("Open in Explorer"), [path]() {
+            QProcess::startDetached(QStringLiteral("explorer.exe"),
+                                    {QStringLiteral("/select,"), QDir::toNativeSeparators(path)});
+        });
+        menu.addAction(QStringLiteral("Copy Path"), [path]() {
+            QApplication::clipboard()->setText(QDir::toNativeSeparators(path));
+        });
+        menu.exec(tree->viewport()->mapToGlobal(pos));
+    });
+
+    auto* btnRow = new QHBoxLayout();
+    auto* exportDupesBtn = new QPushButton(QStringLiteral("⬇ Export Duplicates CSV"), dlg);
+    btnRow->addStretch();
+    btnRow->addWidget(exportDupesBtn);
+
+    connect(exportDupesBtn, &QPushButton::clicked, dlg, [this, sortedGroups, dlg]() {
+        const QString filePath = QFileDialog::getSaveFileName(
+            dlg,
+            QStringLiteral("Export Duplicate Files"),
+            QStringLiteral("DiskSentinel_Duplicates.csv"),
+            QStringLiteral("CSV Files (*.csv);;All Files (*)"));
+        if (filePath.isEmpty()) return;
+
+        QFile file(filePath);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
+
+        QTextStream out(&file);
+        out << "Group,Name,Path,Size (bytes),Size,Hash\n";
+        int group = 0;
+        for (const auto& [hash, nodes] : sortedGroups) {
+            ++group;
+            for (DiskNode* node : nodes) {
+                auto escape = [](const QString& s) -> QString {
+                    if (s.contains(QLatin1Char(',')) || s.contains(QLatin1Char('"')) || s.contains(QLatin1Char('\n'))) {
+                        QString escaped = s;
+                        escaped.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+                        return QLatin1Char('"') + escaped + QLatin1Char('"');
+                    }
+                    return s;
+                };
+                out << group << ','
+                    << escape(node->name) << ','
+                    << escape(QDir::toNativeSeparators(node->path)) << ','
+                    << node->size << ','
+                    << escape(DiskNode::prettySize(node->size)) << ','
+                    << QString::fromLatin1(hash.toHex()) << '\n';
+            }
+        }
+        file.close();
+        wintools::logger::Logger::log(kLog, wintools::logger::Severity::Pass,
+            QStringLiteral("Duplicates CSV exported to '%1'").arg(filePath));
+    });
+
+    dlgLayout->addWidget(summaryLabel);
+    dlgLayout->addWidget(tree, 1);
+    dlgLayout->addLayout(btnRow);
+
+    const QString dlgStyle = QStringLiteral(
+        "QDialog { background: %1; color: %2; }"
+        "QTreeWidget { background: %3; color: %2; border: 1px solid %4; alternate-background-color: %5; }"
+        "QTreeWidget::item:hover { background: %6; }"
+        "QHeaderView::section { background: %3; color: %7; border: none; border-right: 1px solid %4; padding: 4px 6px; font-weight: bold; }"
+        "QPushButton { background: %3; border: 1px solid %4; color: %2; padding: 6px 12px; border-radius: 6px; }"
+        "QPushButton:hover { background: %6; }"
+        "QLabel { color: %2; }"
+    ).arg(
+        m_palette.windowBackground.name(),
+        m_palette.foreground.name(),
+        m_palette.cardBackground.name(),
+        m_palette.cardBorder.name(),
+        m_palette.hoverBackground.name(),
+        m_palette.hoverBackground.name(),
+        m_palette.mutedForeground.name());
+    dlg->setStyleSheet(dlgStyle);
+
+    dlg->show();
+
+    setStatus(QStringLiteral("Found %1 duplicate groups (%2 wasted).")
+                  .arg(groupCount).arg(DiskNode::prettySize(wastedBytes)));
+    wintools::logger::Logger::log(kLog, wintools::logger::Severity::Pass,
+        QStringLiteral("Duplicate scan: %1 groups, %2 files, %3 wasted.")
+            .arg(groupCount).arg(totalDupeFiles).arg(DiskNode::prettySize(wastedBytes)));
+}
+
 void DiskSentinelWindow::applyTheme() {
     const auto& p = m_palette;
+    const bool dark = wintools::themes::ThemeHelper::isDarkTheme();
 
     auto blend = [](const QColor& base, const QColor& tint, float a) -> QColor {
         return QColor(
@@ -617,9 +1102,9 @@ void DiskSentinelWindow::applyTheme() {
     const QString fg      = p.foreground.name();
     const QString muted   = p.mutedForeground.name();
     const QString accent  = p.accent.name();
-    const QString altBg   = blend(p.windowBackground, p.foreground, 0.04f).name();
-    const QString hoverBg = blend(p.windowBackground, p.foreground, 0.09f).name();
-    const QString selBg   = blend(p.cardBackground,   p.accent,     0.28f).name();
+    const QString altBg   = blend(p.windowBackground, p.foreground, dark ? 0.045f : 0.025f).name();
+    const QString hoverBg = blend(p.windowBackground, p.foreground, dark ? 0.10f : 0.06f).name();
+    const QString selBg   = blend(p.cardBackground,   p.accent, dark ? 0.30f : 0.20f).name();
 
     const QString fluentBase = wintools::themes::FluentStyle::generate(p);
 
@@ -632,17 +1117,17 @@ void DiskSentinelWindow::applyTheme() {
 
         "#toolBar { background: %2; border-bottom: 1px solid %3; }"
 
-        "QLineEdit { background: %2; border: 1px solid %3; border-radius: 6px;"
+        "QLineEdit { background: %1; border: 1px solid %3; border-radius: 6px;"
         "            color: %4; padding: 2px 6px; }"
         "QLineEdit:focus { border: 1px solid %6; }"
 
-        "QPushButton { background: %2; border: 1px solid %3; border-radius: 6px;"
+        "QPushButton { background: %1; border: 1px solid %3; border-radius: 6px;"
         "              color: %4; padding: 2px 8px; }"
         "QPushButton:hover   { background: %8; border: 1px solid %6; }"
         "QPushButton:pressed { background: %9; }"
         "QPushButton:disabled { color: %5; }"
 
-        "QTreeView { background: %1; alternate-background-color: %7; color: %4; border: none; }"
+        "QTreeView { background: %1; alternate-background-color: %7; color: %4; border: 1px solid %3; }"
         "QTreeView::item:hover:!selected { background: %8; }"
         "QTreeView::item:selected { background: %9; color: %4; }"
 
@@ -662,7 +1147,30 @@ void DiskSentinelWindow::applyTheme() {
         "QProgressBar::chunk { background: %6; border-radius: 4px; }"
     ).arg(bg, cardBg, border, fg, muted, accent, altBg, hoverBg, selBg);
 
-    setStyleSheet(fluentBase + dsOverlay);
+    wintools::themes::ThemeHelper::applyThemeTo(this, dsOverlay);
+
+    if (m_treemap) {
+        QPalette pal = m_treemap->palette();
+        pal.setColor(QPalette::Window, p.windowBackground);
+        pal.setColor(QPalette::WindowText, p.mutedForeground);
+        m_treemap->setPalette(pal);
+        m_treemap->setAutoFillBackground(true);
+    }
+
+    if (m_pieChart)
+        m_pieChart->setThemePalette(m_palette);
+
+    const auto swatches = m_legend->findChildren<QFrame*>(QStringLiteral("legendSwatch"));
+    for (auto* swatch : swatches) {
+        const QString category = swatch->property("category").toString();
+        const QColor c = categoryThemeColor(category, p, dark);
+        swatch->setStyleSheet(QStringLiteral("background:%1;border-radius:2px;border:1px solid %2;")
+            .arg(c.name(), p.cardBorder.name()));
+    }
+    const auto labels = m_legend->findChildren<QLabel*>(QStringLiteral("legendLabel"));
+    for (auto* label : labels) {
+        label->setStyleSheet(QStringLiteral("font-size:11px;color:%1;").arg(p.mutedForeground.name()));
+    }
 
     refreshDrives();
 }

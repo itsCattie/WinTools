@@ -1,12 +1,12 @@
 #pragma once
 
-// WinTools: log sink manages feature behavior.
-
 #include "logger/logger.hpp"
 
 #include <QObject>
 #include <QVector>
 #include <mutex>
+#include <QHash>
+#include <QDateTime>
 
 namespace wintools::logger {
 
@@ -31,6 +31,8 @@ private:
     mutable std::mutex      m_mutex;
     QVector<LogEntry>       m_buffer;
     quint64                 m_totalReceived{0};
+    QHash<QString, qint64>  m_lastSeenMs;
+    int                     m_dedupWindowMs{2000};
 };
 
 }

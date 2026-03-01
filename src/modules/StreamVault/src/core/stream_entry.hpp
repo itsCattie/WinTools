@@ -1,7 +1,5 @@
 #pragma once
 
-// StreamVault: stream entry manages core logic and state.
-
 #include <QString>
 #include <QStringList>
 #include <QMetaType>

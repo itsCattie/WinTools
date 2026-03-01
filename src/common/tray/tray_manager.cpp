@@ -6,9 +6,6 @@
 #include <QApplication>
 #include <QIcon>
 #include <QMenu>
-#include <QStyle>
-
-// WinTools: tray manager manages shared infrastructure.
 
 namespace wintools::ui {
 
@@ -35,6 +32,15 @@ TrayManager::TrayManager(QObject* parent)
 
 void TrayManager::show() {
     m_tray->show();
+}
+
+void TrayManager::setTooltip(const QString& text) {
+    m_tray->setToolTip(text.isEmpty() ? QStringLiteral("WinTools") : text);
+}
+
+void TrayManager::showMessage(const QString& title, const QString& message,
+                              QSystemTrayIcon::MessageIcon icon, int msecs) {
+    m_tray->showMessage(title, message, icon, msecs);
 }
 
 void TrayManager::updateModules(

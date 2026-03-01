@@ -1,7 +1,5 @@
 #pragma once
 
-// WinTools: logger manages feature behavior.
-
 #include <QDateTime>
 #include <QMetaType>
 #include <QString>

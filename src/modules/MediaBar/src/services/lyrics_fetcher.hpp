@@ -1,7 +1,5 @@
 #pragma once
 
-// MediaBar: lyrics fetcher manages supporting service operations.
-
 #include "types.hpp"
 
 #include <QByteArray>
