@@ -20,6 +20,18 @@ if(GIT_FOUND AND WINTOOLS_APP_VERSION_OVERRIDE STREQUAL "")
 
     if(WINTOOLS_GIT_TAG_EXACT_RESULT EQUAL 0 AND NOT WINTOOLS_GIT_TAG_EXACT STREQUAL "")
         set(WINTOOLS_APP_VERSION "${WINTOOLS_GIT_TAG_EXACT}")
+    else()
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} describe --tags --abbrev=0
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            OUTPUT_VARIABLE WINTOOLS_GIT_TAG
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+            RESULT_VARIABLE WINTOOLS_GIT_TAG_RESULT
+        )
+        if(WINTOOLS_GIT_TAG_RESULT EQUAL 0 AND NOT WINTOOLS_GIT_TAG STREQUAL "")
+            set(WINTOOLS_APP_VERSION "${WINTOOLS_GIT_TAG}")
+        endif()
     endif()
 endif()
 
@@ -62,11 +74,23 @@ endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Sql Network Test Multimedia Concurrent)
 
-configure_file(
-    ${CMAKE_SOURCE_DIR}/src/common/build/wintools_version.hpp.in
-    ${CMAKE_BINARY_DIR}/generated/wintools_version.hpp
-    @ONLY
-)
+set(_wintools_version_in "${CMAKE_SOURCE_DIR}/src/common/version/wintoolsversion/wintools_version.hpp.in")
+if(NOT EXISTS "${_wintools_version_in}")
+    set(_wintools_version_in "${CMAKE_SOURCE_DIR}/src/common/build/wintools_version.hpp.in")
+endif()
+
+if(EXISTS "${_wintools_version_in}")
+    configure_file(
+        "${_wintools_version_in}"
+        "${CMAKE_BINARY_DIR}/generated/wintools_version.hpp"
+        @ONLY
+    )
+else()
+    message(WARNING "wintools_version.hpp.in not found in source tree; generating minimal header at ${CMAKE_BINARY_DIR}/generated/wintools_version.hpp")
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
+    file(WRITE "${CMAKE_BINARY_DIR}/generated/wintools_version.hpp"
+        "#pragma once\n\n#define WINTOOLS_APP_VERSION_LITERAL \"${WINTOOLS_APP_VERSION}\"\n")
+endif()
 
 set(WINTOOLS_SOURCES
     src/main.cpp

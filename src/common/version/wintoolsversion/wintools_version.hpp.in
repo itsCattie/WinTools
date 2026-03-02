@@ -1,0 +1,3 @@
+#pragma once
+
+#define WINTOOLS_APP_VERSION_LITERAL "@WINTOOLS_APP_VERSION@"

@@ -24,8 +24,5 @@ WinTools is a modular Windows desktop utility app. Each module is a self-contain
 
 or
 
-cmake -S . -B build-cpp -G Ninja \
-  -DCMAKE_PREFIX_PATH="C:/Qt/6.9.3/mingw_64/lib/cmake" \
-  -DCMAKE_BUILD_TYPE=Debug
-
-ninja -C build-cpp
+cmake -S . -B build-cpp -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.9.3/mingw_64/lib/cmake"
+cmake --build build-cpp --config Debug
